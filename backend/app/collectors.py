@@ -34,6 +34,8 @@ from app.probe_targets import validate_approved_probe_urls
 
 RAW_SNAPSHOT_RETENTION = timedelta(days=90)
 HOURLY_RETENTION_MONTHS = 12
+PROBE_AND_ROUTE_RETENTION = timedelta(days=90)
+AUDIT_RETENTION = timedelta(days=365)
 
 
 class SnapshotOrderingError(ValueError):
@@ -272,16 +274,21 @@ def monthly_usage(session: Session, period: YearMonth | str) -> list[UsageBucket
 
 
 def run_daily_retention(session: Session, now: datetime) -> int:
-    """Apply raw/hourly retention without automatically deleting monthly summaries."""
+    """Apply bounded history retention without deleting monthly traffic summaries."""
 
     now = _utc(now)
     raw_cutoff = now - RAW_SNAPSHOT_RETENTION
     hourly_cutoff = _subtract_calendar_months(now, HOURLY_RETENTION_MONTHS)
+    probe_cutoff = now - PROBE_AND_ROUTE_RETENTION
+    audit_cutoff = now - AUDIT_RETENTION
 
     with _write_transaction(session):
         raw_result = session.execute(delete(PeerSnapshotRecord).where(PeerSnapshotRecord.observed_at < raw_cutoff))
         hourly_result = session.execute(delete(TrafficHourly).where(TrafficHourly.hour_start < hourly_cutoff))
-    return (raw_result.rowcount or 0) + (hourly_result.rowcount or 0)
+        probe_result = session.execute(delete(ProbeEvent).where(ProbeEvent.observed_at < probe_cutoff))
+        route_result = session.execute(delete(RouteEvent).where(RouteEvent.observed_at < probe_cutoff))
+        audit_result = session.execute(delete(AuditEvent).where(AuditEvent.observed_at < audit_cutoff))
+    return sum(result.rowcount or 0 for result in (raw_result, hourly_result, probe_result, route_result, audit_result))
 
 
 @dataclass(frozen=True, slots=True)
