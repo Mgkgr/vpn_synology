@@ -10,6 +10,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
+from sqlalchemy import text
 
 from app.auth import AuthService, LoginThrottle
 from app.collectors import Collector, register_collector_jobs
@@ -133,6 +134,19 @@ def create_app(
     @application.get("/api/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @application.get("/api/ready")
+    async def ready() -> dict[str, str]:
+        runtime = getattr(application.state, "runtime", None)
+        if runtime is None:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "service unavailable")
+        try:
+            with runtime.session_factory() as session:
+                session.execute(text("SELECT 1"))
+            await runtime.mihomo.version()
+        except Exception as error:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "service unavailable") from error
+        return {"status": "ready"}
 
     @application.exception_handler(RequestValidationError)
     async def redact_validation_error(_request: Request, error: RequestValidationError) -> JSONResponse:

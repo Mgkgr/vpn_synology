@@ -108,6 +108,7 @@ def bootstrap(client: TestClient) -> str:
 
 def test_healthz_is_the_only_anonymous_status_endpoint(client: TestClient) -> None:
     assert client.get("/api/healthz").json() == {"status": "ok"}
+    assert client.get("/api/ready").json() == {"status": "ready"}
     assert client.get("/api/overview").status_code == 401
 
 
