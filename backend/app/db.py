@@ -26,6 +26,8 @@ def create_sqlite_engine(database_path: str | Path) -> Engine:
     @event.listens_for(engine, "connect")
     def enable_foreign_keys(connection: Connection, _record: object) -> None:
         connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA busy_timeout=5000")
 
     return engine
 
