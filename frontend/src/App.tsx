@@ -12,7 +12,16 @@ import { RoutesPage } from './pages/RoutesPage'
 import { RulesPage } from './pages/RulesPage'
 import { UpdatesPage } from './pages/UpdatesPage'
 
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } })
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+      refetchOnWindowFocus: false,
+      staleTime: 15_000,
+      gcTime: 10 * 60_000,
+    },
+  },
+})
 
 function Protected({ children, sessionKey }: { children: React.ReactNode; sessionKey: number }) {
   const session = useQuery({ queryKey: ['session', sessionKey], queryFn: api.restoreSession, retry: false, staleTime: Infinity })
