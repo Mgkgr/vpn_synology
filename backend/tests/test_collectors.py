@@ -413,6 +413,9 @@ def test_collector_lifespan_registers_and_stops_scheduler_only_when_explicitly_e
         async def scheduled_geo_upgrade(self) -> None:
             pass
 
+        async def catch_up_geo_upgrade(self) -> bool:
+            return False
+
     scheduler = Scheduler()
     app = create_app(runtime_factory=lambda: CollectorRuntime(CollectorStub(), scheduler))
     unstarted_client = TestClient(app)
@@ -429,9 +432,10 @@ def test_collector_lifespan_registers_and_stops_scheduler_only_when_explicitly_e
         assert [options["id"] for _func, _trigger, options in scheduler.jobs] == [
             "collector-minute",
             "collector-probe",
-            "collector-daily",
-            "collector-geo-upgrade",
-        ]
+                "collector-daily",
+                "collector-geo-upgrade",
+                "collector-geo-catchup",
+            ]
     assert scheduler.stopped is True
 
 
@@ -527,6 +531,27 @@ def test_scheduled_geo_upgrade_is_audited_separately_from_a_manual_request(tmp_p
         engine.dispose()
 
 
+def test_geo_upgrade_catchup_runs_when_no_success_exists_for_26_hours(tmp_path) -> None:
+    engine = create_sqlite_engine(tmp_path / "dashboard.sqlite3")
+    create_all(engine)
+    factory = create_session_factory(engine)
+    mihomo = StubMihomo()
+    now = datetime(2026, 7, 15, 5, tzinfo=UTC)
+    try:
+        collector = make_collector(
+            factory,
+            wgeasy=StubWgEasy(ContractStatus(False, "not used")),
+            mihomo=mihomo,
+            geodata_dir=tmp_path / "geodata",
+            now=lambda: now,
+        )
+
+        assert run(collector.catch_up_geo_upgrade()) is True
+        assert mihomo.geo_upgrade_calls == 1
+    finally:
+        engine.dispose()
+
+
 def test_register_collector_jobs_runs_geo_update_every_day_at_four_yekaterinburg_time(tmp_path) -> None:
     class Scheduler:
         def __init__(self) -> None:
@@ -556,9 +581,10 @@ def test_register_collector_jobs_runs_geo_update_every_day_at_four_yekaterinburg
         assert [(trigger, options["id"], options.get("minutes")) for _func, trigger, options in scheduler.jobs] == [
             ("interval", "collector-minute", 1),
             ("interval", "collector-probe", 5),
-            ("interval", "collector-daily", None),
-            ("cron", "collector-geo-upgrade", None),
-        ]
+                ("interval", "collector-daily", None),
+                ("cron", "collector-geo-upgrade", None),
+                ("date", "collector-geo-catchup", None),
+            ]
         assert scheduler.jobs[2][2]["hours"] == 24
         assert scheduler.jobs[3][2]["hour"] == 4
         assert scheduler.jobs[3][2]["minute"] == 0

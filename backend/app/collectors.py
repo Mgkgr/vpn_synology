@@ -626,6 +626,22 @@ class Collector:
 
         await self._geo_upgrade("scheduler", source="scheduled")
 
+    async def catch_up_geo_upgrade(self) -> bool:
+        """Refresh GeoData after a missed daily window, without duplicating fresh updates."""
+
+        now = _utc(self._clock())
+        with self._session_factory() as session:
+            last_success = session.scalar(
+                select(GeoUpdate.observed_at)
+                .where(GeoUpdate.operation == "geo_upgrade", GeoUpdate.succeeded.is_(True))
+                .order_by(GeoUpdate.observed_at.desc())
+                .limit(1)
+            )
+        if last_success is not None and last_success >= now - timedelta(hours=26):
+            return False
+        await self._geo_upgrade("scheduler", source="catchup")
+        return True
+
     async def _geo_upgrade(self, actor: str, *, source: str) -> None:
         """Serialize manual and scheduled upgrades to keep their audit trail unambiguous."""
 
@@ -874,6 +890,12 @@ def register_collector_jobs(scheduler: object, collector: Collector) -> None:
         replace_existing=True,
         coalesce=True,
         misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        collector.catch_up_geo_upgrade,
+        "date",
+        id="collector-geo-catchup",
+        replace_existing=True,
     )
 
 
