@@ -20,13 +20,13 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(case_sensitive=False, extra="ignore", hide_input_in_errors=True, validate_default=True)
 
-    dashboard_bind: str = "192.168.2.103:8088"
+    dashboard_bind: str = "127.0.0.1:8088"
     mihomo_url: AnyHttpUrl = "http://vpn-wireguard:9091"
     wgeasy_url: AnyHttpUrl = "http://vpn-wireguard:51821"
     metacubexd_url: AnyHttpUrl = "http://metacubexd:80"
     kuma_url: AnyHttpUrl = "http://uptime-kuma:3001"
     mihomo_api_secret: SecretStr | None = None
-    dashboard_encryption_key: SecretStr | None = None
+    dashboard_encryption_key: SecretStr
     delay_test_host_allowlist: tuple[str, ...] = DELAY_TEST_HOST_ALLOWLIST
     delay_test_urls: tuple[str, ...] = DELAY_TEST_URLS
     database_path: Path = Path("/data/dashboard.sqlite3")
@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     @field_validator("dashboard_bind")
     @classmethod
     def require_nas_lan_bind(cls, value: str) -> str:
-        if value != "192.168.2.103:8088":
-            raise ValueError("dashboard_bind must be 192.168.2.103:8088")
+        if value != "127.0.0.1:8088":
+            raise ValueError("dashboard_bind must be 127.0.0.1:8088")
         return value
 
     @field_validator("mihomo_url")
@@ -58,9 +58,7 @@ class Settings(BaseSettings):
 
     @field_validator("dashboard_encryption_key")
     @classmethod
-    def require_fernet_key(cls, value: SecretStr | None) -> SecretStr | None:
-        if value is None:
-            return None
+    def require_fernet_key(cls, value: SecretStr) -> SecretStr:
         try:
             encoded_key = value.get_secret_value().encode("ascii")
             decoded_key = base64.urlsafe_b64decode(encoded_key)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +10,7 @@ from sqlalchemy import CheckConstraint, UniqueConstraint
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.auth import LoginThrottle
 from app.db import create_all, create_session_factory, create_sqlite_engine
 from app.main import create_app
 from app.mihomo import ControllerWriteResult, MihomoVersion, ProxyGroup, Traffic
@@ -108,6 +109,33 @@ def bootstrap(client: TestClient) -> str:
 def test_healthz_is_the_only_anonymous_status_endpoint(client: TestClient) -> None:
     assert client.get("/api/healthz").json() == {"status": "ok"}
     assert client.get("/api/overview").status_code == 401
+
+
+def test_login_throttle_blocks_an_ip_after_five_failures(tmp_path) -> None:
+    engine = create_sqlite_engine(tmp_path / "throttle.sqlite3")
+    create_all(engine)
+    throttle = LoginThrottle(create_session_factory(engine), max_failures=5, window=timedelta(minutes=15), block_for=timedelta(minutes=15))
+    now = datetime(2026, 7, 14, tzinfo=UTC)
+
+    for _ in range(5):
+        throttle.record_failure("203.0.113.10", now)
+
+    assert throttle.is_blocked("203.0.113.10", now)
+    assert not throttle.is_blocked("203.0.113.11", now)
+    engine.dispose()
+
+
+def test_login_throttle_clears_failed_attempts_after_success(tmp_path) -> None:
+    engine = create_sqlite_engine(tmp_path / "throttle.sqlite3")
+    create_all(engine)
+    throttle = LoginThrottle(create_session_factory(engine), max_failures=5, window=timedelta(minutes=15), block_for=timedelta(minutes=15))
+    now = datetime(2026, 7, 14, tzinfo=UTC)
+
+    throttle.record_failure("203.0.113.10", now)
+    throttle.record_success("203.0.113.10")
+
+    assert not throttle.is_blocked("203.0.113.10", now)
+    engine.dispose()
 
 
 def test_bootstrap_creates_one_owner_and_secure_session_cookie(client: TestClient) -> None:

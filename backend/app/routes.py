@@ -19,6 +19,7 @@ from app.auth import (
     AuthService,
     AuthenticatedSession,
     BootstrapUnavailable,
+    LoginThrottle,
     get_auth_service,
     require_admin,
 )
@@ -88,6 +89,7 @@ class RuntimeContainer:
     csrf_encryption_key: str | None = None
     probe_targets: Any | None = None
     policy_rule_service: Any | None = None
+    login_throttle: LoginThrottle | None = None
 
 
 def build_api_router() -> APIRouter:
@@ -108,12 +110,19 @@ def build_api_router() -> APIRouter:
     @router.post("/auth/login", response_model=AuthSessionResponse)
     async def login(payload: LoginRequest, response: Response, request: Request) -> AuthSessionResponse:
         auth = get_auth_service(request)
+        throttle = _login_throttle(request)
+        client_ip = _client_ip(request)
+        now = datetime.now(UTC)
+        if throttle.is_blocked(client_ip, now):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
         try:
             issued = auth.login(payload.username, payload.password)
         except ValueError as error:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials") from error
         if issued is None:
+            throttle.record_failure(client_ip, now)
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
+        throttle.record_success(client_ip)
         _set_session_cookie(response, auth, issued.token, issued.expires_at)
         return AuthSessionResponse(csrf_token=issued.csrf_token)
 
@@ -770,6 +779,18 @@ def _set_session_cookie(response: Response, auth: AuthService, token: str, expir
 def _require_csrf(request: Request, principal: AuthenticatedSession) -> None:
     if not get_auth_service(request).verify_csrf(principal, request.headers.get("X-CSRF-Token")):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "csrf verification failed")
+
+
+def _login_throttle(request: Request) -> LoginThrottle:
+    throttle = getattr(request.app.state, "login_throttle", None)
+    if not isinstance(throttle, LoginThrottle):
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "authentication temporarily unavailable")
+    return throttle
+
+
+def _client_ip(request: Request) -> str:
+    client = request.client
+    return client.host if client is not None and client.host else "unknown"
 
 
 def _client_response(client: Any) -> ClientResponse:

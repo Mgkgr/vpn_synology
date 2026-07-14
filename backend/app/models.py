@@ -212,6 +212,17 @@ class DashboardSession(Base):
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
 
+class LoginThrottleRecord(Base):
+    """Persistent login-failure window keyed by the effective client address."""
+
+    __tablename__ = "login_throttle_records"
+
+    ip_address: Mapped[str] = mapped_column(String(64), primary_key=True)
+    failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    window_started_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    blocked_until: Mapped[datetime | None] = mapped_column(UtcDateTime())
+
+
 class WgEasyCredential(Base):
     """The sole encrypted-at-rest credential payload used to call wg-easy."""
 

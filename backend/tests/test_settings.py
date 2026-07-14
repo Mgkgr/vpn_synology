@@ -25,9 +25,9 @@ def test_rejects_a_non_lan_dashboard_bind() -> None:
         Settings(dashboard_bind="0.0.0.0:8080", **valid_values())
 
 
-def test_accepts_the_nas_lan_bind() -> None:
+def test_accepts_the_localhost_reverse_proxy_bind() -> None:
     assert (
-        Settings(dashboard_bind="192.168.2.103:8088", **valid_values()).dashboard_bind.endswith(":8088")
+        Settings(dashboard_bind="127.0.0.1:8088", **valid_values()).dashboard_bind.endswith(":8088")
     )
 
 
@@ -40,7 +40,7 @@ def test_accepts_configurable_urls_for_every_read_only_service_probe() -> None:
         kuma_url="http://kuma.internal:3001/status",
         mihomo_api_secret="controller-secret",
     )
-    settings = Settings(dashboard_bind="192.168.2.103:8088", **values)
+    settings = Settings(dashboard_bind="127.0.0.1:8088", **values)
 
     assert str(settings.wgeasy_url).startswith("http://wg-easy.internal:51821")
     assert str(settings.mihomo_url).startswith("http://mihomo.internal:9091")
@@ -84,10 +84,9 @@ def test_rejects_an_encryption_key_that_is_not_32_bytes() -> None:
         Settings(dashboard_bind="192.168.2.103:8088", **values)
 
 
-def test_allows_startup_without_wgeasy_encryption_bootstrap() -> None:
+def test_rejects_startup_without_persistent_dashboard_encryption_key() -> None:
     values = valid_values()
     values.pop("dashboard_encryption_key")
 
-    settings = Settings(dashboard_bind="192.168.2.103:8088", **values)
-
-    assert settings.dashboard_encryption_key is None
+    with pytest.raises(ValidationError, match="dashboard_encryption_key"):
+        Settings(dashboard_bind="127.0.0.1:8088", **values)

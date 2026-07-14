@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.models import AuditEvent, DashboardAdmin, DashboardOwner, DashboardSession
+from app.models import AuditEvent, DashboardAdmin, DashboardOwner, DashboardSession, LoginThrottleRecord
 
 
 SESSION_COOKIE = "vpn_dashboard_session"
@@ -48,6 +48,44 @@ class IssuedSession:
 class DashboardAdministrator:
     username: str
     bootstrap_owner: bool
+
+
+class LoginThrottle:
+    """Persisted, IP-scoped login limiter that survives application restarts."""
+
+    def __init__(
+        self,
+        session_factory: sessionmaker[Session],
+        *,
+        max_failures: int = 5,
+        window: timedelta = timedelta(minutes=15),
+        block_for: timedelta = timedelta(minutes=15),
+    ) -> None:
+        self._session_factory = session_factory
+        self._max_failures = max_failures
+        self._window = window
+        self._block_for = block_for
+
+    def is_blocked(self, ip_address: str, now: datetime) -> bool:
+        with self._session_factory() as session:
+            record = session.get(LoginThrottleRecord, ip_address)
+            return record is not None and record.blocked_until is not None and record.blocked_until > now
+
+    def record_failure(self, ip_address: str, now: datetime) -> None:
+        with self._session_factory.begin() as session:
+            record = session.get(LoginThrottleRecord, ip_address)
+            if record is None or record.window_started_at + self._window <= now:
+                record = LoginThrottleRecord(ip_address=ip_address, failures=0, window_started_at=now, blocked_until=None)
+                session.add(record)
+            record.failures += 1
+            if record.failures >= self._max_failures:
+                record.blocked_until = now + self._block_for
+
+    def record_success(self, ip_address: str) -> None:
+        with self._session_factory.begin() as session:
+            record = session.get(LoginThrottleRecord, ip_address)
+            if record is not None:
+                session.delete(record)
 
 
 class AuthService:

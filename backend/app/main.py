@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 
-from app.auth import AuthService
+from app.auth import AuthService, LoginThrottle
 from app.collectors import Collector, register_collector_jobs
 from app.db import create_all, create_session_factory, create_sqlite_engine
 from app.mihomo import MihomoClient
@@ -45,11 +45,7 @@ def create_collector_runtime(settings: Settings | None = None) -> CollectorRunti
     create_all(engine)
     session_factory = create_session_factory(engine)
     encryption_key = settings.dashboard_encryption_key
-    vault = (
-        WgEasyCredentialVault(session_factory, encryption_key.get_secret_value())
-        if encryption_key is not None
-        else None
-    )
+    vault = WgEasyCredentialVault(session_factory, encryption_key.get_secret_value())
     mihomo_secret = settings.mihomo_api_secret.get_secret_value() if settings.mihomo_api_secret is not None else None
     probe_targets = ProbeTargetService(session_factory)
     mihomo = MihomoClient(
@@ -84,9 +80,10 @@ def create_collector_runtime(settings: Settings | None = None) -> CollectorRunti
             audit_session_factory=session_factory,
         ),
         collector=collector,
-        csrf_encryption_key=encryption_key.get_secret_value() if encryption_key is not None else None,
+        csrf_encryption_key=encryption_key.get_secret_value(),
         probe_targets=probe_targets,
         policy_rule_service=ManagedRuleService(settings.direct_rules_path.parent, mihomo, session_factory),
+        login_throttle=LoginThrottle(session_factory),
     )
     return CollectorRuntime(collector, AsyncIOScheduler(timezone="UTC"), engine.dispose, container)
 
@@ -131,6 +128,7 @@ def create_app(
             cookie_secure=container.cookie_secure,
             csrf_encryption_key=container.csrf_encryption_key,
         )
+        application.state.login_throttle = container.login_throttle or LoginThrottle(container.session_factory)
 
     @application.get("/api/healthz")
     async def healthz() -> dict[str, str]:
