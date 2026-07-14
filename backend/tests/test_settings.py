@@ -62,7 +62,7 @@ def test_rejects_mihomo_url_with_userinfo() -> None:
     values["mihomo_url"] = "http://user:password@vpn-wireguard:9091"
 
     with pytest.raises(ValidationError):
-        Settings(dashboard_bind="192.168.2.103:8088", **values)
+        Settings(dashboard_bind="127.0.0.1:8088", **values)
 
 
 def test_rejects_wgeasy_userinfo_without_echoing_it_from_validation() -> None:
@@ -71,7 +71,7 @@ def test_rejects_wgeasy_userinfo_without_echoing_it_from_validation() -> None:
     values["wgeasy_url"] = unsafe_url
 
     with pytest.raises(ValidationError) as raised:
-        Settings(dashboard_bind="192.168.2.103:8088", **values)
+        Settings(dashboard_bind="127.0.0.1:8088", **values)
 
     assert unsafe_url not in str(raised.value)
 
@@ -81,7 +81,7 @@ def test_rejects_an_encryption_key_that_is_not_32_bytes() -> None:
     values["dashboard_encryption_key"] = "bm90LXRoaXJ0eS10d28tYnl0ZXM="
 
     with pytest.raises(ValidationError):
-        Settings(dashboard_bind="192.168.2.103:8088", **values)
+        Settings(dashboard_bind="127.0.0.1:8088", **values)
 
 
 def test_rejects_startup_without_persistent_dashboard_encryption_key() -> None:

@@ -63,7 +63,7 @@ class MockWgEasy:
 @pytest.fixture
 def adapter_parts(tmp_path: Any) -> tuple[Settings, WgEasyCredentialVault, MockWgEasy, Any]:
     settings = Settings(
-        dashboard_bind="192.168.2.103:8088",
+        dashboard_bind="127.0.0.1:8088",
         mihomo_url="http://mihomo:9091",
         wgeasy_url="http://vpn-wireguard:51821",
         metacubexd_url="http://metacubexd:9090",
