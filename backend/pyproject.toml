@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools==75.8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vpn-dashboard-backend"
+version = "0.1.0"
+description = "LAN-only status dashboard for the VPN gateway"
+requires-python = ">=3.12"
+dependencies = [
+    "APScheduler==3.10.4",
+    "argon2-cffi==23.1.0",
+    "cryptography==45.0.6",
+    "fastapi==0.115.8",
+    "httpx==0.28.1",
+    "pydantic-settings==2.7.1",
+    "SQLAlchemy==2.0.38",
+    "uvicorn[standard]==0.34.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.5",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+include = ["app*"]

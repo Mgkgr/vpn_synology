@@ -1,0 +1,18 @@
+services:
+  dashboard:
+    build: .
+    container_name: vpn-dashboard
+    restart: unless-stopped
+    ports: ["192.168.2.103:8088:8080"]
+    env_file:
+      - ./deploy/dashboard.env
+    networks: [vpn-gateway_default]
+    volumes:
+      - ./deploy/data:/data
+      # The nested bind mount intentionally overrides the read-only parent.
+      - /volume1/docker/vpn-gateway/mihomo:/gateway:ro
+      - /volume1/docker/vpn-gateway/mihomo/rules:/gateway/rules:rw
+
+networks:
+  vpn-gateway_default:
+    external: true

@@ -1,0 +1,11 @@
+APScheduler==3.10.4
+argon2-cffi==23.1.0
+cryptography==45.0.6
+fastapi==0.115.8
+httpx==0.28.1
+pydantic-settings==2.7.1
+SQLAlchemy==2.0.38
+uvicorn[standard]==0.34.0
+
+[dev]
+pytest==8.3.5

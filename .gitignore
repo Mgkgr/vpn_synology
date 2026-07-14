@@ -1,0 +1,32 @@
+# Runtime secrets and persistent state
+deploy/dashboard.env
+deploy/data/
+*.sqlite3
+*.db
+*.bak
+*.key
+*.pem
+*.p12
+*.pfx
+*.conf
+
+# JavaScript build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+
+# Python caches and test output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local editor and OS files
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,1 @@
+"""VPN dashboard application package."""
