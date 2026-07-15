@@ -63,7 +63,7 @@ chmod "$rules_mode" "$rules_tmp"
 mv "$config_tmp" "$CONFIG"
 mv "$rules_tmp" "$DIRECT_RULES"
 
-if ! "$DOCKER_BIN" exec "$MIHOMO_CONTAINER" mihomo -t -d /root/.config/mihomo; then
+if ! "$DOCKER_BIN" exec "$MIHOMO_CONTAINER" /mihomo -t -d /root/.config/mihomo; then
   restore
   echo 'RESULT=failed' >&2
   echo 'REASON=Mihomo configuration validation failed; backups were restored' >&2
