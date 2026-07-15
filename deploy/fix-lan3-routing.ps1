@@ -20,7 +20,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Repair script upload failed.' }
 
 # sudo asks once for the NAS password. The remote script always restores its
 # own backups if validation or the Mihomo restart fails.
-$remoteCommand = "chmod 700 '$remoteScript'; sudo sh '$remoteScript'; ``$rc=``$?; rm -f '$remoteScript'; exit ``$rc"
+$remoteCommand = "chmod 700 '$remoteScript'; sudo sh '$remoteScript'; rc=`$?; rm -f '$remoteScript'; exit `$rc"
 & ssh -t -p $Port $sshTarget $remoteCommand
 if ($LASTEXITCODE -ne 0) { throw 'LAN routing repair failed. Existing configuration was restored if the remote validation reached that stage.' }
 
