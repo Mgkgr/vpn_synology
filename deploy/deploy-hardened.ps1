@@ -17,7 +17,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Commit or stash local changes before deploymen
 try {
   & git -C $repo archive --format=tar --output=$archive HEAD
   if ($LASTEXITCODE -ne 0) { throw 'Could not create source archive.' }
-  & scp -P $Port $archive "${sshTarget}:$remoteArchive"
+  # Synology's SSH service may not expose the SFTP subsystem required by
+  # modern OpenSSH scp; -O selects the compatible legacy SCP protocol.
+  & scp -O -P $Port $archive "${sshTarget}:$remoteArchive"
   if ($LASTEXITCODE -ne 0) { throw 'Source upload failed.' }
   & ssh -p $Port $sshTarget "mkdir -p '$ProjectDir' && tar -xf '$remoteArchive' -C '$ProjectDir' && rm -f '$remoteArchive'"
   if ($LASTEXITCODE -ne 0) { throw 'Source extraction failed.' }
