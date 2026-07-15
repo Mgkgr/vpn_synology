@@ -111,6 +111,9 @@ def create_app(
                 cookie_secure=runtime.container.cookie_secure,
                 csrf_encryption_key=runtime.container.csrf_encryption_key,
             )
+            app.state.login_throttle = runtime.container.login_throttle or LoginThrottle(
+                runtime.container.session_factory
+            )
         register_collector_jobs(runtime.scheduler, runtime.collector)
         runtime.scheduler.start()
         app.state.collector = runtime.collector

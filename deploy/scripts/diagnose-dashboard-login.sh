@@ -58,7 +58,7 @@ PY
 # This uses a deliberately invalid payload.  A 422 response confirms that the
 # running application exposes the login route without attempting a real login
 # or creating an audit/throttle entry.
-"$DOCKER_BIN" exec "$DASHBOARD_CONTAINER" python - <<'PY'
+"$DOCKER_BIN" exec -i "$DASHBOARD_CONTAINER" python - <<'PY'
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
