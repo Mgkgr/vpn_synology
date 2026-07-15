@@ -21,7 +21,7 @@ describe('OverviewPage', () => {
     })
     vi.spyOn(api, 'trafficUsage').mockResolvedValue({ period: 'month', usage: [] })
     vi.spyOn(api, 'updates').mockResolvedValue({ updates: [] })
-    vi.spyOn(api, 'journal').mockResolvedValue({ events: [] })
+    vi.spyOn(api, 'journal').mockResolvedValue({ events: [], page: 1, page_size: 50, has_more: false })
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
     render(<QueryClientProvider client={client}><OverviewPage /></QueryClientProvider>)

@@ -218,6 +218,9 @@ export interface JournalEvent {
 
 export interface JournalResponse {
   events: JournalEvent[]
+  page: number
+  page_size: number
+  has_more: boolean
 }
 
 export interface TrafficUsage {
@@ -238,4 +241,6 @@ export interface JournalFilters {
   action?: string
   outbound?: string
   endpoint?: string
+  page?: string
+  page_size?: string
 }

@@ -740,16 +740,21 @@ def build_api_router() -> APIRouter:
         action: str | None = Query(default=None, max_length=64),
         outbound: str | None = Query(default=None, max_length=255),
         endpoint: str | None = Query(default=None, max_length=255),
+        page: int = Query(default=1, ge=1, le=100),
+        page_size: int = Query(default=50, ge=10, le=200),
         _: AuthenticatedSession = Depends(require_admin),
     ) -> JournalResponse:
         runtime = _runtime(request)
         filters = _journal_filters(from_value, to_value, action, outbound, endpoint)
+        read_limit = min(page * page_size + 1, 10_001)
         with runtime.session_factory() as session:
-            audit_rows = session.scalars(select(AuditEvent).order_by(AuditEvent.id.desc()).limit(200)).all()
-            route_rows = session.scalars(select(RouteEvent).order_by(RouteEvent.id.desc()).limit(200)).all()
-            probe_rows = session.scalars(select(ProbeEvent).order_by(ProbeEvent.id.desc()).limit(200)).all()
+            audit_rows = session.scalars(select(AuditEvent).order_by(AuditEvent.id.desc()).limit(read_limit)).all()
+            route_rows = session.scalars(select(RouteEvent).order_by(RouteEvent.id.desc()).limit(read_limit)).all()
+            probe_rows = session.scalars(select(ProbeEvent).order_by(ProbeEvent.id.desc()).limit(read_limit)).all()
         events = _journal_events(audit_rows, route_rows, probe_rows, filters)
-        return JournalResponse(events=events[:200])
+        start = (page - 1) * page_size
+        end = start + page_size
+        return JournalResponse(events=events[start:end], page=page, page_size=page_size, has_more=len(events) > end)
 
     return router
 

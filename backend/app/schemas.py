@@ -296,6 +296,9 @@ class JournalEventResponse(BaseModel):
 
 class JournalResponse(BaseModel):
     events: list[JournalEventResponse]
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=10, le=200)
+    has_more: bool
 
 
 class TrafficUsageResponse(BaseModel):

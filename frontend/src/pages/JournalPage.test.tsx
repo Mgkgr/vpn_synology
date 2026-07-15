@@ -9,7 +9,7 @@ afterEach(() => vi.restoreAllMocks())
 
 describe('JournalPage', () => {
   it('передаёт фильтр выхода серверу вместо поиска по actor или action', async () => {
-    const journal = vi.spyOn(api, 'journal').mockResolvedValue({ events: [] })
+    const journal = vi.spyOn(api, 'journal').mockResolvedValue({ events: [], page: 1, page_size: 50, has_more: false })
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
     render(<QueryClientProvider client={client}><JournalPage /></QueryClientProvider>)
