@@ -22,6 +22,30 @@ const russianGeoSiteCategories = new Set([
   'mailru-group', 'cdek', 'megafon', 'mts-ru', 'rostelecom', 't2-ru',
 ])
 
+const p2pGeoSiteCategories = new Set([
+  'category-public-tracker', 'category-pt', 'tracker',
+])
+
+const streamingGeoSiteCategories = new Set([
+  'category-entertainment', 'category-media', 'disney', 'hbo', 'primevideo', 'twitch', 'dazn', 'bilibili', 'biliintl',
+])
+
+const gamesGeoSiteCategories = new Set([
+  'category-games', 'category-game-platforms-download', 'category-android-app-download', 'steam',
+])
+
+const specialGeoSiteCategories = new Set([
+  'anime', 'ehentai', 'category-porn', 'category-ads-all', 'speedtest',
+])
+
+const groupedGeoSiteCategories = new Set([
+  ...russianGeoSiteCategories,
+  ...p2pGeoSiteCategories,
+  ...streamingGeoSiteCategories,
+  ...gamesGeoSiteCategories,
+  ...specialGeoSiteCategories,
+])
+
 function normalizedLines(value: string): string[] {
   return value.split('\n').map((line) => line.trim()).filter(Boolean)
 }
@@ -39,10 +63,23 @@ function RouteActionPicker({ value, onChange }: { value: ManagedRuleInput['actio
 function CategoryPicker({ catalog, kind, category, onPick }: { catalog: PolicyCategory[], kind: PolicyKind, category: string, onPick: (item: PolicyCategory) => void }) {
   const geosite = catalog.filter((item) => item.kind === 'GEOSITE')
   const geoip = catalog.filter((item) => item.kind === 'GEOIP')
-  const russian = geosite.filter((item) => russianGeoSiteCategories.has(item.category))
-  const popular = geosite.filter((item) => !russianGeoSiteCategories.has(item.category))
+  const inGroup = (categories: Set<string>) => geosite.filter((item) => categories.has(item.category))
+  const russian = inGroup(russianGeoSiteCategories)
+  const p2p = inGroup(p2pGeoSiteCategories)
+  const streaming = inGroup(streamingGeoSiteCategories)
+  const games = inGroup(gamesGeoSiteCategories)
+  const special = inGroup(specialGeoSiteCategories)
+  const popular = geosite.filter((item) => !groupedGeoSiteCategories.has(item.category))
   const group = (title: string, description: string, items: PolicyCategory[]) => <div className="policy-category-group"><div><h3>{title}</h3><p>{description}</p></div><div className="policy-category-options">{items.map((item) => <button type="button" className={`policy-category-option ${kind === item.kind && category === item.category ? 'selected' : ''}`} key={`${item.kind}-${item.category}`} aria-pressed={kind === item.kind && category === item.category} onClick={() => onPick(item)}><strong>{item.label}</strong><small>{item.description || (item.kind === 'GEOSITE' ? 'доменная категория' : 'сеть или страна')}</small></button>)}</div></div>
-  return <div className="policy-category-groups">{russian.length > 0 && group('Российские сервисы', 'Банки, маркетплейсы, госуслуги и инфраструктура. Широкое правило направит весь набор российских доменов, поэтому для банков и магазинов лучше выбрать точную категорию.', russian)}{group('Популярные сайты и сервисы', 'OpenAI, Claude, Google, видео и мессенджеры.', popular)}{group('Сети и страны GeoIP', 'Правила для IP-адресов, CDN и регионов.', geoip)}</div>
+  return <div className="policy-category-groups">
+    {russian.length > 0 && group('Российские сервисы', 'Банки, маркетплейсы, госуслуги и инфраструктура. Широкое правило направит весь набор российских доменов, поэтому для банков и магазинов лучше выбрать точную категорию.', russian)}
+    {p2p.length > 0 && group('P2P / торренты', 'Только домены трекеров. Это не анализ и не перехват всего BitTorrent-трафика.', p2p)}
+    {streaming.length > 0 && group('Видео и стриминг', 'Широкие категории могут включать легальные сервисы, медиа и общую инфраструктуру. Для узкого маршрута выбирайте точный сервис.', streaming)}
+    {games.length > 0 && group('Игры и загрузки', 'Игровые платформы, обновления и источники загрузок; широкие правила могут затронуть CDN.', games)}
+    {special.length > 0 && group('Инфраструктура и специальные категории', 'Тематические и инфраструктурные наборы. Они задают маршрут, но не блокируют домены.', special)}
+    {popular.length > 0 && group('Популярные сайты и сервисы', 'OpenAI, Claude, Google, видео и мессенджеры.', popular)}
+    {geoip.length > 0 && group('Сети и страны GeoIP', 'Правила для IP-адресов, CDN и регионов.', geoip)}
+  </div>
 }
 
 function PolicyRow({

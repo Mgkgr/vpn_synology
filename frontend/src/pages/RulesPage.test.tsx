@@ -114,4 +114,40 @@ describe('RulesPage', () => {
 
     await waitFor(() => expect(create.mock.calls[0]?.[0]).toEqual({ kind: 'GEOSITE', category: 'ozon', action: 'DIRECT', enabled: true }))
   })
+
+  it('отделяет P2P, стриминг, игры и специальные GeoSite-категории без автоматического создания правила', async () => {
+    const create = vi.spyOn(api, 'createManagedRule').mockResolvedValue({ id: 9, kind: 'GEOSITE', category: 'category-public-tracker', label: 'Публичные торрент-трекеры', action: 'VPS-FALLBACK', enabled: true })
+    vi.spyOn(api, 'rules').mockResolvedValue({
+      rules: [],
+      providers: [],
+      direct_text: '',
+      policies: [],
+      policy_catalog: [
+        { kind: 'GEOSITE', category: 'category-public-tracker', label: 'Публичные торрент-трекеры', description: 'Сопоставляется по домену трекера; не распознаёт весь протокол BitTorrent или P2P-трафик.' },
+        { kind: 'GEOSITE', category: 'category-entertainment', label: 'Видео и развлечения — широкая категория' },
+        { kind: 'GEOSITE', category: 'category-games', label: 'Игры — широкая категория' },
+        { kind: 'GEOSITE', category: 'speedtest', label: 'Speedtest' },
+        { kind: 'GEOSITE', category: 'openai', label: 'OpenAI / ChatGPT' },
+        { kind: 'GEOIP', category: 'US', label: 'США (IP)' },
+      ],
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    render(<QueryClientProvider client={client}><RulesPage /></QueryClientProvider>)
+
+    expect(await screen.findByRole('heading', { name: 'P2P / торренты' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Видео и стриминг' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Игры и загрузки' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Инфраструктура и специальные категории' })).toBeVisible()
+    expect(screen.getByText(/Сопоставляется по домену трекера/)).toBeVisible()
+    expect(create).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: /Публичные торрент-трекеры/ }))
+    expect(create).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Авто VPN WG-IMP → HY2-NL' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Добавить правило' }))
+
+    await waitFor(() => expect(create).toHaveBeenCalled())
+    expect(create.mock.calls[0]?.[0]).toEqual({ kind: 'GEOSITE', category: 'category-public-tracker', action: 'VPS-FALLBACK', enabled: true })
+  })
 })
