@@ -1,6 +1,6 @@
 import asyncio
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -23,6 +23,7 @@ from app.models import (
     AuditEvent,
     GeoFileMetadata,
     GeoUpdate,
+    GatewayTrafficSample,
     PeerBaseline,
     PeerSnapshotRecord,
     ProbeEvent,
@@ -30,6 +31,7 @@ from app.models import (
     TrafficHourly,
     TrafficMonthly,
 )
+from app.mihomo import Traffic
 from app.services import ServiceStatus
 from app.wgeasy import ContractStatus, WireGuardClient
 
@@ -125,6 +127,23 @@ def test_retention_removes_hourly_data_older_than_twelve_months_but_keeps_monthl
     ]
 
 
+def test_retention_keeps_only_a_bounded_week_of_gateway_throughput_samples(session) -> None:
+    now = at("2026-07-13T12:00:00Z")
+    session.add_all(
+        [
+            GatewayTrafficSample(observed_at=now - timedelta(days=7, seconds=1), up_bps=10, down_bps=20),
+            GatewayTrafficSample(observed_at=now - timedelta(days=6), up_bps=30, down_bps=40),
+        ]
+    )
+    session.commit()
+
+    removed = run_daily_retention(session, now)
+
+    remaining = session.scalars(select(GatewayTrafficSample)).all()
+    assert removed == 1
+    assert [(row.up_bps, row.down_bps) for row in remaining] == [(30, 40)]
+
+
 def test_retention_deletes_all_old_raw_snapshots_but_keeps_a_separate_peer_baseline(session) -> None:
     record_peer_snapshot(session, peer("desktop", rx=100, tx=10), at("2026-01-01T00:00:00Z"))
     record_peer_snapshot(session, peer("desktop", rx=120, tx=20), at("2026-01-02T00:00:00Z"))
@@ -195,6 +214,9 @@ class StubMihomo:
         selected = self.selections.pop(0) if self.selections else "WG-IMP"
         return [ProxyGroup("VPS-FALLBACK", "fallback", ("WG-IMP", "HY2-NL"), selected)]
 
+    async def traffic(self) -> Traffic:
+        return Traffic(up=1_500, down=2_500)
+
     async def proxy_delay(self, name: str, url: str) -> ProxyDelay:
         self.delay_calls.append((name, url))
         return ProxyDelay(37)
@@ -255,9 +277,15 @@ def test_minute_records_normalized_peers_services_and_fallback_state(tmp_path) -
 
         with factory() as session:
             snapshot = session.scalars(select(PeerSnapshotRecord)).one()
+            traffic = session.scalars(select(GatewayTrafficSample)).one()
             events = session.scalars(select(ProbeEvent).order_by(ProbeEvent.target)).all()
         assert (snapshot.peer_id, snapshot.received_bytes, snapshot.transmitted_bytes) == ("8", 123, 45)
         assert snapshot.latest_handshake_at == at("2026-07-13T11:59:00Z")
+        assert (traffic.observed_at, traffic.up_bps, traffic.down_bps) == (
+            at("2026-07-13T12:00:00Z"),
+            1_500,
+            2_500,
+        )
         assert [(event.target, event.succeeded, event.outbound) for event in events] == [
             ("fallback:VPS-FALLBACK", True, "WG-IMP"),
             ("route-state:VPS-FALLBACK", True, "WG-IMP"),

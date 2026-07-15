@@ -1,4 +1,5 @@
 export type Period = 'month' | 'year'
+export type RealtimeTrafficPeriod = '5m' | '30m' | '6h'
 
 export interface AuthSession {
   csrf_token: string
@@ -233,6 +234,18 @@ export interface TrafficUsage {
 export interface TrafficUsageResponse {
   period: Period
   usage: TrafficUsage[]
+}
+
+export interface RealtimeTrafficPoint {
+  observed_at: string
+  up_bps: number
+  down_bps: number
+}
+
+export interface RealtimeTrafficResponse {
+  period: RealtimeTrafficPeriod
+  sample_interval_seconds: number
+  points: RealtimeTrafficPoint[]
 }
 
 export interface JournalFilters {

@@ -11,6 +11,10 @@ export function formatBytes(value: number): string {
   return `${(value / 1024 ** exponent).toFixed(exponent === 0 ? 0 : 1)} ${units[exponent]}`
 }
 
+export function formatRate(value: number): string {
+  return `${formatBytes(value)}/с`
+}
+
 export function formatDate(value: string | null): string {
   if (!value) return 'нет данных'
   const date = new Date(value)

@@ -1,23 +1,25 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { api } from '../api/client'
-import type { Period } from '../api/types'
+import type { RealtimeTrafficPeriod } from '../api/types'
 import { AsyncState } from '../components/AsyncState'
-import { formatBytes, formatDate, Status } from '../components/Status'
+import { formatBytes, formatDate, formatRate, Status } from '../components/Status'
 import { TrafficChart } from '../components/TrafficChart'
 
 export function OverviewPage() {
-  const [period, setPeriod] = useState<Period>('month')
+  const [trafficPeriod, setTrafficPeriod] = useState<RealtimeTrafficPeriod>('30m')
   const overview = useQuery({ queryKey: ['overview'], queryFn: api.overview })
-  const trafficUsage = useQuery({ queryKey: ['traffic-usage', period], queryFn: () => api.trafficUsage(period) })
+  const realtimeTraffic = useQuery({
+    queryKey: ['traffic-realtime', trafficPeriod],
+    queryFn: () => api.realtimeTraffic(trafficPeriod),
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+  })
   const updates = useQuery({ queryKey: ['updates'], queryFn: api.updates })
   const journal = useQuery({ queryKey: ['journal', 'latest'], queryFn: () => api.journal() })
   const data = overview.data
-  const traffic = useMemo(() => (trafficUsage.data?.usage ?? []).reduce(
-    (total, item) => ({ up: total.up + item.transmitted_bytes, down: total.down + item.received_bytes }),
-    { up: 0, down: 0 },
-  ), [trafficUsage.data])
+  const traffic = realtimeTraffic.data?.points.at(-1) ?? null
   const selectedExit = data?.fallback.selected ?? null
 
   return (
@@ -37,9 +39,11 @@ export function OverviewPage() {
         </section>
         <div className="overview-grid">
           <section className="panel traffic-panel" aria-labelledby="traffic-title">
-            <div className="section-heading"><div><h2 id="traffic-title">Трафик</h2><span>учтённые дельты SQLite за выбранный период</span></div><div className="period-toggle" role="group" aria-label="Период трафика"><button className={period === 'month' ? 'active' : ''} onClick={() => setPeriod('month')} type="button">Месяц</button><button className={period === 'year' ? 'active' : ''} onClick={() => setPeriod('year')} type="button">Год</button></div></div>
-            <div className="traffic-totals"><div><span>Входящий</span><strong>{formatBytes(traffic.down)}</strong></div><div><span>Исходящий</span><strong>{formatBytes(traffic.up)}</strong></div></div>
-            <TrafficChart down={traffic.down} up={traffic.up} period={period} />
+            <div className="section-heading"><div><h2 id="traffic-title">Трафик</h2><span>{traffic ? `скорость канала · получено ${formatDate(traffic.observed_at)}` : 'скорость канала · сбор раз в минуту'}</span></div><div className="period-toggle" role="group" aria-label="Период графика скорости"><button className={trafficPeriod === '5m' ? 'active' : ''} onClick={() => setTrafficPeriod('5m')} type="button">5 минут</button><button className={trafficPeriod === '30m' ? 'active' : ''} onClick={() => setTrafficPeriod('30m')} type="button">30 минут</button><button className={trafficPeriod === '6h' ? 'active' : ''} onClick={() => setTrafficPeriod('6h')} type="button">6 часов</button></div></div>
+            <div className="traffic-totals"><div><span>Входящий</span><strong>{formatRate(traffic?.down_bps ?? 0)}</strong></div><div><span>Исходящий</span><strong>{formatRate(traffic?.up_bps ?? 0)}</strong></div></div>
+            <AsyncState loading={realtimeTraffic.isLoading} error={realtimeTraffic.error}>
+              <TrafficChart points={realtimeTraffic.data?.points ?? []} />
+            </AsyncState>
           </section>
           <section className="panel geo-panel" aria-labelledby="geo-title">
             <div className="section-heading"><h2 id="geo-title">GeoIP / GeoSite</h2></div>

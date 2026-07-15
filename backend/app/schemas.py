@@ -80,6 +80,18 @@ class TrafficResponse(BaseModel):
     down: int = Field(ge=0)
 
 
+class GatewayTrafficPointResponse(BaseModel):
+    observed_at: datetime
+    up_bps: int = Field(ge=0)
+    down_bps: int = Field(ge=0)
+
+
+class RealtimeTrafficResponse(BaseModel):
+    period: Literal["5m", "30m", "6h"]
+    sample_interval_seconds: int = Field(60, ge=60, le=60)
+    points: list[GatewayTrafficPointResponse]
+
+
 class OverviewResponse(BaseModel):
     client_count: int = Field(ge=0)
     clients: list[ClientResponse]

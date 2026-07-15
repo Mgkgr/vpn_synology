@@ -100,6 +100,22 @@ class TrafficMonthly(Base):
     transmitted_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
+class GatewayTrafficSample(Base):
+    """One lightweight, minute-level throughput observation from Mihomo."""
+
+    __tablename__ = "gateway_traffic_samples"
+    __table_args__ = (
+        CheckConstraint("up_bps >= 0", name="ck_gateway_traffic_up_nonnegative"),
+        CheckConstraint("down_bps >= 0", name="ck_gateway_traffic_down_nonnegative"),
+        Index("ix_gateway_traffic_samples_observed_at", "observed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    observed_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    up_bps: Mapped[int] = mapped_column(Integer, nullable=False)
+    down_bps: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class ProbeEvent(Base):
     __tablename__ = "probe_events"
 

@@ -7,6 +7,8 @@ import type {
   JournalResponse,
   Overview,
   Period,
+  RealtimeTrafficPeriod,
+  RealtimeTrafficResponse,
   RoutesResponse,
   RulesResponse,
   TrafficUsageResponse,
@@ -133,6 +135,7 @@ export const api = {
     body: JSON.stringify({ target_key: payload.targetKey, outbound: payload.outbound }),
   }),
   trafficUsage: (period: Period) => request<TrafficUsageResponse>(`/traffic?period=${period}`),
+  realtimeTraffic: (period: RealtimeTrafficPeriod) => request<RealtimeTrafficResponse>(`/traffic/realtime?period=${period}`),
   journal: (filters: JournalFilters = {}) => {
     const params = new URLSearchParams()
     for (const [name, value] of Object.entries(filters)) {

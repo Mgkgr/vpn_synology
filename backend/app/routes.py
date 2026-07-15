@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import inspect
 import json
 import re
@@ -23,7 +23,7 @@ from app.auth import (
     get_auth_service,
     require_admin,
 )
-from app.models import AuditEvent, GeoFileMetadata, GeoUpdate, ProbeEvent, RouteEvent, TrafficMonthly
+from app.models import AuditEvent, GatewayTrafficSample, GeoFileMetadata, GeoUpdate, ProbeEvent, RouteEvent, TrafficMonthly
 from app.policy_rules import (
     POLICY_CATEGORIES,
     ManagedRuleConfigurationError,
@@ -67,7 +67,9 @@ from app.schemas import (
     RuleChangeResponse,
     SessionRevokeRequest,
     RulesResponse,
+    RealtimeTrafficResponse,
     TrafficResponse,
+    GatewayTrafficPointResponse,
     TrafficUsagePeriodResponse,
     TrafficUsageResponse,
     WgEasyCredentialSetupRequest,
@@ -180,17 +182,17 @@ def build_api_router() -> APIRouter:
         try:
             clients = await runtime.wgeasy.list_clients()
             version = await runtime.mihomo.version()
-            traffic = await runtime.mihomo.traffic()
             groups = await runtime.mihomo.groups()
         except Exception as error:
             raise _upstream_failure() from error
         service_states, stored_fallback = _load_observability_state(runtime)
+        traffic = _load_latest_gateway_traffic(runtime)
         fallback = FallbackStateResponse(selected=_selected_fallback_from_groups(groups) or stored_fallback.selected)
         return OverviewResponse(
             client_count=len(clients),
             clients=[_client_response(client) for client in clients],
             mihomo_version=_safe_text(getattr(version, "version", None)),
-            traffic=TrafficResponse(up=_nonnegative(getattr(traffic, "up", 0)), down=_nonnegative(getattr(traffic, "down", 0))),
+            traffic=traffic,
             services=service_states,
             fallback=fallback,
         )
@@ -732,6 +734,34 @@ def build_api_router() -> APIRouter:
             usage=sorted(totals.values(), key=lambda item: (item.peer_name, item.peer_id or "")),
         )
 
+    @router.get("/traffic/realtime", response_model=RealtimeTrafficResponse)
+    async def realtime_traffic(
+        request: Request,
+        period: str = Query(default="30m", pattern="^(5m|30m|6h)$"),
+        _: AuthenticatedSession = Depends(require_admin),
+    ) -> RealtimeTrafficResponse:
+        minutes = {"5m": 5, "30m": 30, "6h": 360}[period]
+        cutoff = datetime.now(UTC) - timedelta(minutes=minutes)
+        runtime = _runtime(request)
+        with runtime.session_factory() as session:
+            rows = list(reversed(session.scalars(
+                select(GatewayTrafficSample)
+                .where(GatewayTrafficSample.observed_at >= cutoff)
+                .order_by(GatewayTrafficSample.observed_at.desc(), GatewayTrafficSample.id.desc())
+                .limit(minutes)
+            ).all()))
+        return RealtimeTrafficResponse(
+            period=period,
+            points=[
+                GatewayTrafficPointResponse(
+                    observed_at=row.observed_at,
+                    up_bps=row.up_bps,
+                    down_bps=row.down_bps,
+                )
+                for row in rows
+            ],
+        )
+
     @router.get("/journal", response_model=JournalResponse)
     async def journal(
         request: Request,
@@ -960,6 +990,18 @@ def _policy_detail(item: Any) -> str:
 
 _FALLBACK_OUTBOUNDS = frozenset({"WG-IMP", "HY2-NL"})
 _SERVICE_NAMES = frozenset({"wg-easy", "mihomo", "metacubexd", "uptime-kuma"})
+
+
+def _load_latest_gateway_traffic(runtime: RuntimeContainer) -> TrafficResponse | None:
+    """Read the collector's last sample without making a dashboard request poll Mihomo."""
+
+    with runtime.session_factory() as session:
+        sample = session.scalars(
+            select(GatewayTrafficSample).order_by(GatewayTrafficSample.observed_at.desc(), GatewayTrafficSample.id.desc()).limit(1)
+        ).first()
+    if sample is None:
+        return None
+    return TrafficResponse(up=sample.up_bps, down=sample.down_bps)
 
 
 def _load_observability_state(runtime: RuntimeContainer) -> tuple[list[ServiceStatusResponse], FallbackStateResponse]:

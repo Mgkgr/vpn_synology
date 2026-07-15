@@ -22,6 +22,7 @@ from app.models import (
     AuditEvent,
     GeoFileMetadata,
     GeoUpdate,
+    GatewayTrafficSample,
     PeerBaseline,
     PeerSnapshotRecord,
     ProbeEvent,
@@ -36,6 +37,7 @@ RAW_SNAPSHOT_RETENTION = timedelta(days=90)
 HOURLY_RETENTION_MONTHS = 12
 PROBE_AND_ROUTE_RETENTION = timedelta(days=90)
 AUDIT_RETENTION = timedelta(days=365)
+GATEWAY_TRAFFIC_RETENTION = timedelta(days=7)
 
 
 class SnapshotOrderingError(ValueError):
@@ -281,6 +283,7 @@ def run_daily_retention(session: Session, now: datetime) -> int:
     hourly_cutoff = _subtract_calendar_months(now, HOURLY_RETENTION_MONTHS)
     probe_cutoff = now - PROBE_AND_ROUTE_RETENTION
     audit_cutoff = now - AUDIT_RETENTION
+    gateway_traffic_cutoff = now - GATEWAY_TRAFFIC_RETENTION
 
     with _write_transaction(session):
         raw_result = session.execute(delete(PeerSnapshotRecord).where(PeerSnapshotRecord.observed_at < raw_cutoff))
@@ -288,7 +291,13 @@ def run_daily_retention(session: Session, now: datetime) -> int:
         probe_result = session.execute(delete(ProbeEvent).where(ProbeEvent.observed_at < probe_cutoff))
         route_result = session.execute(delete(RouteEvent).where(RouteEvent.observed_at < probe_cutoff))
         audit_result = session.execute(delete(AuditEvent).where(AuditEvent.observed_at < audit_cutoff))
-    return sum(result.rowcount or 0 for result in (raw_result, hourly_result, probe_result, route_result, audit_result))
+        gateway_traffic_result = session.execute(
+            delete(GatewayTrafficSample).where(GatewayTrafficSample.observed_at < gateway_traffic_cutoff)
+        )
+    return sum(
+        result.rowcount or 0
+        for result in (raw_result, hourly_result, probe_result, route_result, audit_result, gateway_traffic_result)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -403,6 +412,7 @@ class Collector:
         observed_at = _utc(self._clock())
         await self._collect_peers(observed_at)
         await self._collect_service_state(observed_at)
+        await self._collect_gateway_traffic(observed_at)
         selected = await self._fallback_selection(observed_at)
         if selected is not None:
             group, outbound = selected
@@ -759,6 +769,26 @@ class Collector:
             ]
         )
 
+    async def _collect_gateway_traffic(self, observed_at: datetime) -> None:
+        """Persist one controller throughput sample; dashboard reads never poll Mihomo."""
+
+        try:
+            traffic = await _await_result(self._mihomo.traffic())
+            up_bps = _nonnegative_throughput(getattr(traffic, "up", None))
+            down_bps = _nonnegative_throughput(getattr(traffic, "down", None))
+        except BaseException as error:
+            reason, _status_code = _safe_mihomo_error(error, "Mihomo traffic is unavailable")
+            self._record_audit(observed_at, "mihomo_traffic_unavailable", reason)
+            return
+        with self._session_factory.begin() as session:
+            session.add(
+                GatewayTrafficSample(
+                    observed_at=observed_at,
+                    up_bps=up_bps,
+                    down_bps=down_bps,
+                )
+            )
+
     async def _fallback_selection(self, observed_at: datetime) -> tuple[str, str] | None:
         try:
             groups = await _await_result(self._mihomo.groups())
@@ -929,6 +959,12 @@ def _is_selected_fallback(group: ProxyGroup) -> bool:
         and group.now in {"WG-IMP", "HY2-NL"}
         and {"WG-IMP", "HY2-NL"}.issubset(group.proxies)
     )
+
+
+def _nonnegative_throughput(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError("traffic throughput must be a non-negative integer")
+    return value
 
 
 def _safe_mihomo_error(error: BaseException, fallback: str) -> tuple[str, int | None]:

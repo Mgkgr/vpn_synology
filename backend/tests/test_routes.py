@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import ipaddress
 from types import SimpleNamespace
 
@@ -13,7 +13,7 @@ from app.collectors import GeoFileSnapshot
 from app.db import create_all, create_session_factory, create_sqlite_engine
 from app.main import create_app
 from app.mihomo import ControllerWriteResult, MihomoVersion, ProxyGroup, Traffic
-from app.models import AuditEvent, GeoFileMetadata, GeoUpdate, ProbeEvent, RouteEvent, TrafficMonthly
+from app.models import AuditEvent, GatewayTrafficSample, GeoFileMetadata, GeoUpdate, ProbeEvent, RouteEvent, TrafficMonthly
 from app.routes import RuntimeContainer
 from app.probe_targets import ProbeTargetService
 from app.rules import DirectRuleValidationError, RuleService
@@ -480,6 +480,38 @@ def test_traffic_usage_uses_stored_monthly_deltas_for_the_requested_period(route
                 "received_bytes": 200,
                 "transmitted_bytes": 100,
             }
+        ],
+    }
+
+
+def test_realtime_traffic_reads_only_minutely_stored_gateway_samples(route_parts) -> None:
+    client, factory = route_parts
+    observed_at = datetime.now(UTC).replace(second=0, microsecond=0)
+    with factory.begin() as session:
+        session.add_all(
+            [
+                GatewayTrafficSample(
+                    observed_at=observed_at - timedelta(minutes=offset),
+                    up_bps=100 + offset,
+                    down_bps=200 + offset,
+                )
+                for offset in reversed(range(5))
+            ]
+        )
+
+    response = client.get("/api/traffic/realtime", params={"period": "5m"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "period": "5m",
+        "sample_interval_seconds": 60,
+        "points": [
+            {
+                "observed_at": (observed_at - timedelta(minutes=offset)).isoformat().replace("+00:00", "Z"),
+                "up_bps": 100 + offset,
+                "down_bps": 200 + offset,
+            }
+            for offset in reversed(range(5))
         ],
     }
 
