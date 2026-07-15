@@ -82,6 +82,10 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ username, password }),
   }),
+  revokeAdministratorSessions: (username: string) => request<void>('/auth/sessions/revoke', {
+    method: 'POST',
+    body: JSON.stringify({ username }),
+  }),
   async logout(): Promise<void> {
     await request<void>('/auth/logout', { method: 'POST' })
     csrfToken = null

@@ -5,6 +5,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { api, setUnauthorizedHandler } from './api/client'
 import { AppShell } from './components/AppShell'
 import { ClientsPage } from './pages/ClientsPage'
+import { AdministratorsPage } from './pages/AdministratorsPage'
 import { JournalPage } from './pages/JournalPage'
 import { LoginPage } from './pages/LoginPage'
 import { OverviewPage } from './pages/OverviewPage'
@@ -45,6 +46,7 @@ function ApplicationRoutes() {
     <Route path="/rules" element={<Protected sessionKey={authVersion}><RulesPage /></Protected>} />
     <Route path="/updates" element={<Protected sessionKey={authVersion}><UpdatesPage /></Protected>} />
     <Route path="/journal" element={<Protected sessionKey={authVersion}><JournalPage /></Protected>} />
+    <Route path="/administrators" element={<Protected sessionKey={authVersion}><AdministratorsPage /></Protected>} />
     <Route path="*" element={<Navigate to="/overview" replace />} />
   </Routes>
 }
