@@ -7,8 +7,10 @@ PROJECT_DIR=${PROJECT_DIR:-/volume1/docker/vpn-dashboard}
 MIHOMO_RULES_DIR=${MIHOMO_RULES_DIR:-/volume1/docker/vpn-gateway/mihomo/rules}
 APP_UID=${APP_UID:-10001}
 APP_GID=${APP_GID:-10001}
+DOCKER_BIN=${DOCKER_BIN:-/usr/local/bin/docker}
 
 [ "$(id -u)" = 0 ] || { echo 'must run as root' >&2; exit 1; }
+[ -x "$DOCKER_BIN" ] || { echo "Docker binary is unavailable: $DOCKER_BIN" >&2; exit 1; }
 [ -f "$PROJECT_DIR/deploy/dashboard.env" ] || { echo 'dashboard.env is missing' >&2; exit 1; }
 grep -q '^DASHBOARD_ENCRYPTION_KEY=.' "$PROJECT_DIR/deploy/dashboard.env" || { echo 'DASHBOARD_ENCRYPTION_KEY is missing' >&2; exit 1; }
 # Preserve all secrets and integration URLs; only remove the direct LAN bind.
@@ -29,5 +31,5 @@ chown -R "$APP_UID:$APP_GID" "$MIHOMO_RULES_DIR"
 find "$MIHOMO_RULES_DIR" -type d -exec chmod 0770 {} \;
 find "$MIHOMO_RULES_DIR" -type f -exec chmod 0660 {} \;
 
-docker compose -f "$PROJECT_DIR/compose.yaml" --env-file "$PROJECT_DIR/deploy/dashboard.env" config --quiet
+"$DOCKER_BIN" compose -f "$PROJECT_DIR/compose.yaml" --env-file "$PROJECT_DIR/deploy/dashboard.env" config --quiet
 echo 'PREPARE_RUNTIME=ready'
