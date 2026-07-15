@@ -122,6 +122,17 @@ def create_app(
                 runtime.close()
 
     application = FastAPI(title="VPN Dashboard", docs_url=None, redoc_url=None, lifespan=lifespan)
+
+    @application.middleware("http")
+    async def add_security_headers(request: Request, call_next: Callable[[Request], Any]):
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
     if container is not None:
         application.state.runtime = container
         application.state.auth_service = AuthService(

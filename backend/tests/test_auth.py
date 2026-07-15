@@ -107,7 +107,11 @@ def bootstrap(client: TestClient) -> str:
 
 
 def test_healthz_is_the_only_anonymous_status_endpoint(client: TestClient) -> None:
-    assert client.get("/api/healthz").json() == {"status": "ok"}
+    health = client.get("/api/healthz")
+    assert health.json() == {"status": "ok"}
+    assert health.headers["x-frame-options"] == "DENY"
+    assert health.headers["x-content-type-options"] == "nosniff"
+    assert "frame-ancestors 'none'" in health.headers["content-security-policy"]
     assert client.get("/api/ready").json() == {"status": "ready"}
     assert client.get("/api/overview").status_code == 401
 
