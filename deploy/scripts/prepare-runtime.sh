@@ -30,6 +30,28 @@ fi
 chown -R "$APP_UID:$APP_GID" "$MIHOMO_RULES_DIR"
 find "$MIHOMO_RULES_DIR" -type d -exec chmod 0770 {} \;
 find "$MIHOMO_RULES_DIR" -type f -exec chmod 0660 {} \;
+# A rules provider may be represented by a symlink.  Recursive chown/find
+# intentionally do not dereference it, so repair its target explicitly while
+# refusing anything outside the dedicated Mihomo rules directory.
+RULES_ROOT=$(cd "$MIHOMO_RULES_DIR" && pwd -P)
+find "$MIHOMO_RULES_DIR" -type l | while IFS= read -r link; do
+  target=$(readlink -f "$link") || { echo "unresolvable rules symlink: $link" >&2; exit 1; }
+  case "$target" in
+    "$RULES_ROOT"/*) ;;
+    *) echo "rules symlink escapes the VPN project: $link" >&2; exit 1 ;;
+  esac
+  if [ -d "$target" ]; then
+    chown -R "$APP_UID:$APP_GID" "$target"
+    find "$target" -type d -exec chmod 0770 {} \;
+    find "$target" -type f -exec chmod 0660 {} \;
+  elif [ -f "$target" ]; then
+    chown "$APP_UID:$APP_GID" "$target"
+    chmod 0660 "$target"
+  else
+    echo "unsupported rules symlink target: $link" >&2
+    exit 1
+  fi
+done
 
 "$DOCKER_BIN" compose -f "$PROJECT_DIR/compose.yaml" --env-file "$PROJECT_DIR/deploy/dashboard.env" config --quiet
 echo 'PREPARE_RUNTIME=ready'
