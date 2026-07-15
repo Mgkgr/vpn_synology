@@ -65,6 +65,7 @@ from app.schemas import (
     ProbeTargetUpdateRequest,
     RuleProviderResponse,
     RuleChangeResponse,
+    SessionRevokeRequest,
     RulesResponse,
     TrafficResponse,
     TrafficUsagePeriodResponse,
@@ -162,6 +163,16 @@ def build_api_router() -> APIRouter:
         except ValueError as error:
             raise HTTPException(status.HTTP_409_CONFLICT, "administrator cannot be created") from error
         return DashboardAdminResponse(username=created.username, bootstrap_owner=created.bootstrap_owner)
+
+    @router.post("/auth/sessions/revoke", status_code=status.HTTP_204_NO_CONTENT)
+    async def revoke_sessions(
+        payload: SessionRevokeRequest,
+        request: Request,
+        principal: AuthenticatedSession = Depends(require_admin),
+    ) -> Response:
+        _require_csrf(request, principal)
+        get_auth_service(request).revoke_actor_sessions(principal.username, payload.username)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @router.get("/overview", response_model=OverviewResponse)
     async def overview(request: Request, _: AuthenticatedSession = Depends(require_admin)) -> OverviewResponse:

@@ -32,6 +32,10 @@ class DashboardAdminResponse(BaseModel):
     bootstrap_owner: bool
 
 
+class SessionRevokeRequest(_StrictModel):
+    username: str = Field(min_length=1, max_length=255)
+
+
 class AuthSessionResponse(BaseModel):
     csrf_token: str = Field(min_length=32, max_length=256)
 

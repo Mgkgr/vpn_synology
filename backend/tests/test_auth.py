@@ -239,6 +239,19 @@ def test_csrf_get_returns_the_session_token_without_invalidating_it(client: Test
     assert accepted.status_code == 201
 
 
+def test_administrator_can_revoke_all_sessions_for_an_account(client: TestClient) -> None:
+    csrf_token = bootstrap(client)
+
+    response = client.post(
+        "/api/auth/sessions/revoke",
+        json={"username": "owner"},
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
+    assert response.status_code == 204
+    assert client.get("/api/auth/csrf").status_code == 401
+
+
 def test_login_and_all_state_changes_require_a_valid_csrf_header(client: TestClient) -> None:
     csrf_token = bootstrap(client)
 

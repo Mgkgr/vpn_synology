@@ -13,7 +13,7 @@ from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatc
 from argon2.low_level import Type
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -232,6 +232,16 @@ class AuthService:
             if record is not None:
                 session.delete(record)
             _audit(session, actor=principal.username, action="logout", succeeded=True)
+
+    def revoke_actor_sessions(self, actor: str, username: str) -> int:
+        """Invalidate every browser session created by one dashboard account."""
+
+        normalized_actor = _username(actor)
+        normalized_username = _username(username)
+        with self._session_factory.begin() as session:
+            result = session.execute(delete(DashboardSession).where(DashboardSession.actor_username == normalized_username))
+            _audit(session, actor=normalized_actor, action="sessions_revoke", succeeded=True)
+            return result.rowcount or 0
 
     def _create_session(
         self,
