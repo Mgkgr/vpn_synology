@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     delay_test_urls: tuple[str, ...] = DELAY_TEST_URLS
     database_path: Path = Path("/data/dashboard.sqlite3")
     direct_rules_path: Path = Path("/gateway/rules/direct.txt")
-    geodata_dir: Path = Path("/gateway/geodata")
+    geodata_dir: Path = Path("/geodata")
 
     @field_validator("dashboard_bind")
     @classmethod

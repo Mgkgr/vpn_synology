@@ -19,6 +19,13 @@ if grep -q '^DASHBOARD_BIND=' "$PROJECT_DIR/deploy/dashboard.env"; then
 else
   printf '\nDASHBOARD_BIND=127.0.0.1:8088\n' >> "$PROJECT_DIR/deploy/dashboard.env"
 fi
+# GeoData is mounted as two read-only assets rather than the Mihomo directory,
+# which keeps controller configuration and outbound credentials out of Dashboard.
+if grep -q '^GEODATA_DIR=' "$PROJECT_DIR/deploy/dashboard.env"; then
+  sed -i 's|^GEODATA_DIR=.*$|GEODATA_DIR=/geodata|' "$PROJECT_DIR/deploy/dashboard.env"
+else
+  printf 'GEODATA_DIR=/geodata\n' >> "$PROJECT_DIR/deploy/dashboard.env"
+fi
 
 install -d -m 0700 -o "$APP_UID" -g "$APP_GID" "$PROJECT_DIR/deploy/data"
 if [ -e "$PROJECT_DIR/deploy/data/dashboard.sqlite3" ]; then
@@ -27,6 +34,8 @@ if [ -e "$PROJECT_DIR/deploy/data/dashboard.sqlite3" ]; then
 fi
 
 [ -d "$MIHOMO_RULES_DIR" ] || { echo 'Mihomo rules directory is missing' >&2; exit 1; }
+[ -r "$(dirname "$MIHOMO_RULES_DIR")/GeoIP.dat" ] || { echo 'Mihomo GeoIP.dat is missing' >&2; exit 1; }
+[ -r "$(dirname "$MIHOMO_RULES_DIR")/GeoSite.dat" ] || { echo 'Mihomo GeoSite.dat is missing' >&2; exit 1; }
 chown -R "$APP_UID:$APP_GID" "$MIHOMO_RULES_DIR"
 find "$MIHOMO_RULES_DIR" -type d -exec chmod 0770 {} \;
 find "$MIHOMO_RULES_DIR" -type f -exec chmod 0660 {} \;

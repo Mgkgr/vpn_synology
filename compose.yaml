@@ -9,8 +9,9 @@ services:
     networks: [vpn-gateway_default]
     volumes:
       - ./deploy/data:/data
-      # The nested bind mount intentionally overrides the read-only parent.
-      - /volume1/docker/vpn-gateway/mihomo:/gateway:ro
+      # Expose only GeoData assets and managed rules; Mihomo config/secrets are never mounted.
+      - /volume1/docker/vpn-gateway/mihomo/GeoIP.dat:/geodata/GeoIP.dat:ro
+      - /volume1/docker/vpn-gateway/mihomo/GeoSite.dat:/geodata/GeoSite.dat:ro
       - /volume1/docker/vpn-gateway/mihomo/rules:/gateway/rules:rw
     read_only: true
     tmpfs:

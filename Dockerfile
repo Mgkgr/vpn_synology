@@ -14,7 +14,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 RUN groupadd --gid 10001 dashboard \
-    && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin dashboard
+    && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin dashboard \
+    && install -d -m 0755 /gateway \
+    && install -d -o dashboard -g dashboard -m 0750 /gateway/rules /geodata
 
 COPY backend/app ./app
 COPY backend/pyproject.toml ./

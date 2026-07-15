@@ -26,7 +26,7 @@ echo 'DASHBOARD_MOUNTS=end'
 echo 'DASHBOARD_RULES_ACCESS=begin'
 "$DOCKER_BIN" exec -u 10001 vpn-dashboard sh -c '
   id
-  ls -ld /gateway /gateway/rules /gateway/rules/direct.txt 2>&1 || true
+  ls -ld /gateway /gateway/rules /gateway/rules/direct.txt /geodata /geodata/GeoIP.dat /geodata/GeoSite.dat 2>&1 || true
   if test -r /gateway/rules/direct.txt; then
     echo DIRECT_READABLE=yes
   else

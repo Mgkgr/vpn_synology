@@ -12,6 +12,8 @@ Synology Task Scheduler запускает backup ежедневно в 03:30 `A
 
 Перед первым запуском hardened-версии root выполняет `deploy/scripts/prepare-runtime.sh`. Он проверяет обязательный ключ, требует localhost-bind, переводит только данные dashboard и его управляемые rule-файлы к непривилегированному UID `10001`, затем запускает `docker compose config --quiet`. Скрипт не перезапускает `vpn-wireguard`, Mihomo или wg-easy.
 
+Dashboard не получает bind-mount каталога Mihomo целиком: ему доступны только `GeoIP.dat`, `GeoSite.dat` в режиме чтения и каталог `rules` для управляемых DIRECT-правил. Конфигурация Mihomo и outbound-секреты не монтируются в контейнер панели.
+
 DSM Reverse Proxy должен направлять `https://roaring.crazedns.ru:10443` на `http://127.0.0.1:8088`. Прямой доступ к `8088` из LAN и WAN после этого отсутствует.
 
 Для повторяемого обновления используется `deploy/deploy-hardened.ps1`. Он передаёт на NAS архив только из Git HEAD, поэтому не затирает `dashboard.env`, SQLite, rule revisions и backup. Скрипт потребует пароль sudo один раз для preflight, после чего вызывает уже ограниченный `vpn-dashboard-deploy` и status-check.

@@ -15,7 +15,7 @@ def valid_values() -> dict[str, str]:
         "wgeasy_url": "http://vpn-wireguard:51821",
         "database_path": "/data/dashboard.sqlite3",
         "direct_rules_path": "/gateway/rules/direct.txt",
-        "geodata_dir": "/gateway/geodata",
+        "geodata_dir": "/geodata",
         "dashboard_encryption_key": TEST_FERNET_KEY,
     }
 
@@ -29,6 +29,13 @@ def test_accepts_the_localhost_reverse_proxy_bind() -> None:
     assert (
         Settings(dashboard_bind="127.0.0.1:8088", **valid_values()).dashboard_bind.endswith(":8088")
     )
+
+
+def test_defaults_geodata_to_the_dedicated_read_only_mount() -> None:
+    values = valid_values()
+    del values["geodata_dir"]
+
+    assert Settings(dashboard_bind="127.0.0.1:8088", **values).geodata_dir.as_posix() == "/geodata"
 
 
 def test_accepts_configurable_urls_for_every_read_only_service_probe() -> None:
