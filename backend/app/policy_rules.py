@@ -41,6 +41,63 @@ POLICY_CATEGORIES: tuple[PolicyCategory, ...] = (
     PolicyCategory("GEOSITE", "spotify", "Spotify"),
     PolicyCategory("GEOSITE", "twitter", "X / Twitter"),
     PolicyCategory("GEOSITE", "tiktok", "TikTok"),
+    PolicyCategory(
+        "GEOSITE", "category-public-tracker", "Публичные торрент-трекеры",
+        "Сопоставляется по домену трекера; не распознаёт весь протокол BitTorrent или P2P-трафик.",
+    ),
+    PolicyCategory(
+        "GEOSITE", "category-pt", "Закрытые торрент-трекеры",
+        "Сопоставляется по домену private tracker; не распознаёт весь протокол BitTorrent или P2P-трафик.",
+    ),
+    PolicyCategory(
+        "GEOSITE", "tracker", "Tracker-домены",
+        "Общий набор доменов трекеров; сопоставление не анализирует полезную нагрузку BitTorrent.",
+    ),
+    PolicyCategory(
+        "GEOSITE", "category-entertainment", "Видео и развлечения — широкая категория",
+        "Смешанный набор медиа, видео и развлечений; может включать легальные сервисы и общую инфраструктуру.",
+    ),
+    PolicyCategory(
+        "GEOSITE", "category-media", "Медиа и видеосервисы — широкая категория",
+        "Широкий набор доменов медиа; выбирайте точный сервис, если не хотите менять маршрут всех источников.",
+    ),
+    PolicyCategory("GEOSITE", "disney", "Disney+", "Точная доменная категория сервиса."),
+    PolicyCategory("GEOSITE", "hbo", "HBO", "Точная доменная категория сервиса."),
+    PolicyCategory("GEOSITE", "primevideo", "Prime Video", "Точная доменная категория сервиса."),
+    PolicyCategory("GEOSITE", "twitch", "Twitch", "Точная доменная категория сервиса."),
+    PolicyCategory("GEOSITE", "dazn", "DAZN", "Точная доменная категория сервиса."),
+    PolicyCategory("GEOSITE", "bilibili", "Bilibili", "Точная доменная категория сервиса."),
+    PolicyCategory("GEOSITE", "biliintl", "Bilibili International", "Точная доменная категория сервиса."),
+    PolicyCategory(
+        "GEOSITE", "category-games", "Игры — широкая категория",
+        "Широкий тематический набор игровых доменов; для точной платформы лучше выбрать отдельный сервис.",
+    ),
+    PolicyCategory(
+        "GEOSITE", "category-game-platforms-download", "Игровые платформы и загрузки",
+        "Набор доменов платформ и загрузок игр; может затронуть обновления и CDN.",
+    ),
+    PolicyCategory(
+        "GEOSITE", "category-android-app-download", "Загрузка Android-приложений",
+        "Набор источников загрузки Android-приложений; маршрут влияет на обновления и CDN.",
+    ),
+    PolicyCategory("GEOSITE", "steam", "Steam", "Точная доменная категория игровой платформы."),
+    PolicyCategory(
+        "GEOSITE", "anime", "Аниме-сервисы",
+        "Тематический набор с разными источниками; выбирайте маршрут осознанно.",
+    ),
+    PolicyCategory("GEOSITE", "ehentai", "EHentai", "Точная тематическая доменная категория."),
+    PolicyCategory(
+        "GEOSITE", "category-porn", "Взрослый контент",
+        "Широкая тематическая категория. Она не создаёт маршрут автоматически и может содержать много разных источников.",
+    ),
+    PolicyCategory(
+        "GEOSITE", "category-ads-all", "Реклама — широкая категория",
+        "Широкое правило для рекламных доменов; оно не блокирует их, а только назначает маршрут.",
+    ),
+    PolicyCategory(
+        "GEOSITE", "speedtest", "Speedtest",
+        "Маршрут этой категории влияет на результаты измерения скорости и задержки.",
+    ),
     # Russian GeoSite tags below are checked against the GeoSite.dat currently
     # installed on the gateway.  Broad categories are intentionally distinct
     # from individual services, so an administrator can make a narrow DIRECT

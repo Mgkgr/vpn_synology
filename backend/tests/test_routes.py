@@ -14,6 +14,7 @@ from app.db import create_all, create_session_factory, create_sqlite_engine
 from app.main import create_app
 from app.mihomo import ControllerWriteResult, MihomoVersion, ProxyGroup, Traffic
 from app.models import AuditEvent, GatewayTrafficSample, GeoFileMetadata, GeoUpdate, ProbeEvent, RouteEvent, TrafficMonthly
+from app.policy_rules import ManagedRuleService
 from app.routes import RuntimeContainer
 from app.probe_targets import ProbeTargetService
 from app.rules import DirectRuleValidationError, RuleService
@@ -102,6 +103,16 @@ class InvalidRules:
 class LiveFallbackMihomo(FakeMihomo):
     async def groups(self):
         return [ProxyGroup("VPS-FALLBACK", "Fallback", ("WG-IMP", "HY2-NL"), "WG-IMP")]
+
+
+class FakePolicyMihomo(FakeMihomo):
+    async def rule_providers(self):
+        return [
+            SimpleNamespace(name="managed-direct"),
+            SimpleNamespace(name="managed-fallback"),
+            SimpleNamespace(name="managed-wg-imp"),
+            SimpleNamespace(name="managed-hy2-nl"),
+        ]
 
 
 @dataclass
@@ -699,21 +710,53 @@ def test_updates_includes_direct_and_managed_rule_audit(route_parts) -> None:
     ]
 
 
-def test_rules_catalogue_contains_current_ai_and_russian_service_categories(route_parts) -> None:
-    client, _factory = route_parts
+def test_rules_catalogue_contains_current_ai_russian_p2p_and_streaming_categories(route_parts, tmp_path) -> None:
+    client, factory = route_parts
 
     response = client.get("/api/rules")
 
     assert response.status_code == 200
     categories = {(item["kind"], item["category"]) for item in response.json()["policy_catalog"]}
-    assert ("GEOSITE", "category-ai-!cn") in categories
-    assert ("GEOSITE", "microsoft") in categories
-    assert ("GEOSITE", "category-bank-ru") in categories
-    assert ("GEOSITE", "category-ecommerce-ru") in categories
-    assert ("GEOSITE", "category-gov-ru") in categories
-    assert ("GEOSITE", "ozon") in categories
-    assert ("GEOSITE", "sber") in categories
-    assert ("GEOIP", "cloudfront") in categories
+    required = {
+        ("GEOSITE", "category-ai-!cn"), ("GEOSITE", "microsoft"),
+        ("GEOSITE", "category-bank-ru"), ("GEOSITE", "category-ecommerce-ru"),
+        ("GEOSITE", "category-gov-ru"), ("GEOSITE", "ozon"),
+        ("GEOSITE", "sber"), ("GEOIP", "cloudfront"),
+        ("GEOSITE", "category-public-tracker"), ("GEOSITE", "category-pt"),
+        ("GEOSITE", "tracker"), ("GEOSITE", "category-entertainment"),
+        ("GEOSITE", "category-media"), ("GEOSITE", "disney"),
+        ("GEOSITE", "hbo"), ("GEOSITE", "primevideo"),
+        ("GEOSITE", "twitch"), ("GEOSITE", "dazn"),
+        ("GEOSITE", "bilibili"), ("GEOSITE", "biliintl"),
+        ("GEOSITE", "anime"), ("GEOSITE", "ehentai"),
+        ("GEOSITE", "category-porn"), ("GEOSITE", "category-games"),
+        ("GEOSITE", "category-game-platforms-download"),
+        ("GEOSITE", "category-android-app-download"), ("GEOSITE", "steam"),
+        ("GEOSITE", "category-ads-all"), ("GEOSITE", "speedtest"),
+    }
+    assert required <= categories
+
+    client.app.state.runtime.policy_rule_service = ManagedRuleService(tmp_path / "rules", FakePolicyMihomo(), factory)
+    created = client.post(
+        "/api/rules/policies",
+        json={"kind": "GEOSITE", "category": "category-public-tracker", "action": "VPS-FALLBACK", "enabled": True},
+    )
+    rejected = client.post(
+        "/api/rules/policies",
+        json={"kind": "GEOSITE", "category": "category-p2p", "action": "VPS-FALLBACK", "enabled": True},
+    )
+
+    assert created.status_code == 201
+    assert created.json() == {
+        "id": 1,
+        "kind": "GEOSITE",
+        "category": "category-public-tracker",
+        "label": "Публичные торрент-трекеры",
+        "action": "VPS-FALLBACK",
+        "enabled": True,
+    }
+    assert rejected.status_code == 422
+    assert rejected.json() == {"detail": "invalid managed rule"}
 
 
 def test_manual_probe_reports_busy_state_and_safe_failure_reason(route_parts) -> None:
