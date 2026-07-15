@@ -11,7 +11,12 @@ APP_GID=${APP_GID:-10001}
 [ "$(id -u)" = 0 ] || { echo 'must run as root' >&2; exit 1; }
 [ -f "$PROJECT_DIR/deploy/dashboard.env" ] || { echo 'dashboard.env is missing' >&2; exit 1; }
 grep -q '^DASHBOARD_ENCRYPTION_KEY=.' "$PROJECT_DIR/deploy/dashboard.env" || { echo 'DASHBOARD_ENCRYPTION_KEY is missing' >&2; exit 1; }
-grep -q '^DASHBOARD_BIND=127\.0\.0\.1:8088$' "$PROJECT_DIR/deploy/dashboard.env" || { echo 'DASHBOARD_BIND must be 127.0.0.1:8088' >&2; exit 1; }
+# Preserve all secrets and integration URLs; only remove the direct LAN bind.
+if grep -q '^DASHBOARD_BIND=' "$PROJECT_DIR/deploy/dashboard.env"; then
+  sed -i 's|^DASHBOARD_BIND=.*$|DASHBOARD_BIND=127.0.0.1:8088|' "$PROJECT_DIR/deploy/dashboard.env"
+else
+  printf '\nDASHBOARD_BIND=127.0.0.1:8088\n' >> "$PROJECT_DIR/deploy/dashboard.env"
+fi
 
 install -d -m 0700 -o "$APP_UID" -g "$APP_GID" "$PROJECT_DIR/deploy/data"
 if [ -e "$PROJECT_DIR/deploy/data/dashboard.sqlite3" ]; then
