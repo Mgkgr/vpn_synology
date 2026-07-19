@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.models import ManagedRulePolicy
+from app.models import AuditEvent, ManagedRulePolicy
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +196,65 @@ class ManagedRuleService:
         with self._session_factory() as session:
             rows = session.scalars(select(ManagedRulePolicy).order_by(ManagedRulePolicy.id)).all()
         return [_to_policy(row) for row in rows]
+
+    async def ensure_default_openai_fallback(self) -> bool:
+        """Create the safe OpenAI default once, never overriding an admin rule."""
+
+        await asyncio.to_thread(self._lock.acquire)
+        policy_id: int | None = None
+        try:
+            with self._session_factory.begin() as session:
+                existing = session.scalar(
+                    select(ManagedRulePolicy.id).where(
+                        ManagedRulePolicy.kind == "GEOSITE",
+                        ManagedRulePolicy.category == "openai",
+                    )
+                )
+                if existing is not None:
+                    return False
+                now = datetime.now(UTC)
+                row = ManagedRulePolicy(
+                    kind="GEOSITE",
+                    category="openai",
+                    action="VPS-FALLBACK",
+                    enabled=True,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(row)
+                session.flush()
+                policy_id = row.id
+            try:
+                await self._apply_current()
+            except BaseException:
+                with self._session_factory.begin() as session:
+                    stale = session.get(ManagedRulePolicy, policy_id)
+                    if stale is not None:
+                        session.delete(stale)
+                    session.add(
+                        AuditEvent(
+                            observed_at=datetime.now(UTC),
+                            actor="system",
+                            action="policy_default_openai",
+                            succeeded=False,
+                            error_text="default OpenAI policy could not be applied",
+                            detail='{"kind":"GEOSITE","category":"openai","action":"VPS-FALLBACK"}',
+                        )
+                    )
+                raise
+            with self._session_factory.begin() as session:
+                session.add(
+                    AuditEvent(
+                        observed_at=datetime.now(UTC),
+                        actor="system",
+                        action="policy_default_openai",
+                        succeeded=True,
+                        detail='{"kind":"GEOSITE","category":"openai","action":"VPS-FALLBACK"}',
+                    )
+                )
+            return True
+        finally:
+            self._lock.release()
 
     async def create(self, *, kind: str, category: str, action: str, enabled: bool) -> PolicyRule:
         kind, category, action = _validate(kind, category, action)

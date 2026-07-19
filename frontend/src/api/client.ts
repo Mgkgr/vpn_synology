@@ -20,6 +20,7 @@ import type {
   ManagedRuleInput,
   ManagedRulePolicy,
   ProbeDiagnosis,
+  HostHealth,
 } from './types'
 
 export class ApiError extends Error {
@@ -93,6 +94,7 @@ export const api = {
     csrfToken = null
   },
   overview: () => request<Overview>('/overview'),
+  hostHealth: () => request<HostHealth>('/host-health'),
   routes: () => request<RoutesResponse>('/routes'),
   clients: () => request<Client[]>('/clients'),
   wgeasyCredentialStatus: () => request<WgEasyCredentialStatus>('/wgeasy/credentials/status'),

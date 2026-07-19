@@ -1,6 +1,7 @@
 # Runtime secrets and persistent state
 deploy/dashboard.env
 deploy/data/
+deploy/secrets/
 *.sqlite3
 *.db
 *.bak

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from ipaddress import ip_address, ip_network
 import inspect
 import json
+from math import isfinite
+from pathlib import Path
 import re
 from typing import Any
 from urllib.parse import quote
@@ -43,6 +46,8 @@ from app.schemas import (
     DashboardAdminResponse,
     GeoAssetResponse,
     GeoUpdateResponse,
+    HostContainerResponse,
+    HostHealthResponse,
     FallbackStateResponse,
     JournalEventResponse,
     JournalResponse,
@@ -93,6 +98,10 @@ class RuntimeContainer:
     probe_targets: Any | None = None
     policy_rule_service: Any | None = None
     login_throttle: LoginThrottle | None = None
+    trusted_proxy_networks: tuple[Any, ...] = ()
+    trusted_hosts: tuple[str, ...] = ("testserver",)
+    max_request_body_bytes: int = 65_536
+    host_health_path: Path = Path("/data/host-health.json")
 
 
 def build_api_router() -> APIRouter:
@@ -196,6 +205,10 @@ def build_api_router() -> APIRouter:
             services=service_states,
             fallback=fallback,
         )
+
+    @router.get("/host-health", response_model=HostHealthResponse)
+    async def host_health(request: Request, _: AuthenticatedSession = Depends(require_admin)) -> HostHealthResponse:
+        return _read_host_health(_runtime(request).host_health_path)
 
     @router.get("/routes", response_model=RoutesResponse)
     async def routes(request: Request, _: AuthenticatedSession = Depends(require_admin)) -> RoutesResponse:
@@ -487,7 +500,11 @@ def build_api_router() -> APIRouter:
         return Response(
             content=configuration,
             media_type="text/plain; charset=utf-8",
-            headers={"Content-Disposition": _configuration_disposition(filename)},
+            headers={
+                "Content-Disposition": _configuration_disposition(filename),
+                "Cache-Control": "no-store, private",
+                "Pragma": "no-cache",
+            },
         )
 
     @router.get("/clients/{client_id}/qr")
@@ -500,7 +517,11 @@ def build_api_router() -> APIRouter:
             svg = await _runtime(request).wgeasy.qrcode(client_id)
         except Exception as error:
             raise _upstream_failure() from error
-        return Response(content=svg, media_type="image/svg+xml")
+        return Response(
+            content=svg,
+            media_type="image/svg+xml",
+            headers={"Cache-Control": "no-store, private", "Pragma": "no-cache"},
+        )
 
     @router.get("/rules", response_model=RulesResponse)
     async def rules(request: Request, _: AuthenticatedSession = Depends(require_admin)) -> RulesResponse:
@@ -836,7 +857,91 @@ def _login_throttle(request: Request) -> LoginThrottle:
 
 def _client_ip(request: Request) -> str:
     client = request.client
-    return client.host if client is not None and client.host else "unknown"
+    remote_host = client.host if client is not None and client.host else "unknown"
+    try:
+        remote_ip = ip_address(remote_host)
+    except ValueError:
+        return remote_host
+    networks = getattr(request.app.state, "trusted_proxy_networks", ())
+    try:
+        trusted = any(remote_ip in (network if hasattr(network, "version") else ip_network(network)) for network in networks)
+    except ValueError:
+        trusted = False
+    if not trusted:
+        return str(remote_ip)
+    forwarded = request.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
+    try:
+        return str(ip_address(forwarded))
+    except ValueError:
+        return str(remote_ip)
+
+
+def _read_host_health(path: Path) -> HostHealthResponse:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        load = _required_mapping(payload.get("load"))
+        memory = _required_mapping(payload.get("memory"))
+        volume = _required_mapping(payload.get("volume"))
+        network = _required_mapping(payload.get("network"))
+        raw_containers = payload.get("containers")
+        if not isinstance(raw_containers, list):
+            raise ValueError("containers must be a list")
+        containers = [
+            HostContainerResponse(
+                name=_safe_required(item.get("name")),
+                state=_safe_required(item.get("state")),
+                restart_count=_nonnegative(item.get("restart_count", 0)),
+                health=_safe_text(item.get("health")),
+            )
+            for item in raw_containers
+            if isinstance(item, dict)
+        ]
+        if len(containers) != len(raw_containers):
+            raise ValueError("container must be an object")
+        return HostHealthResponse(
+            observed_at=_safe_required(payload.get("observed_at")),
+            cpu_usage_percent=_optional_percent(payload.get("cpu_usage_percent")),
+            load_one=_nonnegative_float(load.get("one")),
+            load_five=_nonnegative_float(load.get("five")),
+            load_fifteen=_nonnegative_float(load.get("fifteen")),
+            memory_total_bytes=_nonnegative(memory.get("total_bytes")),
+            memory_available_bytes=_nonnegative(memory.get("available_bytes")),
+            swap_total_bytes=_nonnegative(memory.get("swap_total_bytes")),
+            swap_free_bytes=_nonnegative(memory.get("swap_free_bytes")),
+            volume_total_bytes=_nonnegative(volume.get("total_bytes")),
+            volume_available_bytes=_nonnegative(volume.get("available_bytes")),
+            network_rx_errors=_nonnegative(network.get("rx_errors")),
+            network_rx_dropped=_nonnegative(network.get("rx_dropped")),
+            network_tx_errors=_nonnegative(network.get("tx_errors")),
+            network_tx_dropped=_nonnegative(network.get("tx_dropped")),
+            containers=containers,
+        )
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "host health is unavailable") from error
+
+
+def _required_mapping(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError("object is required")
+    return value
+
+
+def _nonnegative_float(value: object) -> float:
+    if isinstance(value, bool):
+        raise ValueError("number is required")
+    result = float(value)
+    if not isfinite(result) or result < 0:
+        raise ValueError("number must be nonnegative")
+    return result
+
+
+def _optional_percent(value: object) -> float | None:
+    if value is None:
+        return None
+    result = _nonnegative_float(value)
+    if result > 100:
+        raise ValueError("percentage must not exceed 100")
+    return result
 
 
 def _client_response(client: Any) -> ClientResponse:

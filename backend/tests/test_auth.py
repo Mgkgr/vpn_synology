@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from ipaddress import ip_network
+import json
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 from sqlalchemy import CheckConstraint, UniqueConstraint
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -15,7 +18,7 @@ from app.db import create_all, create_session_factory, create_sqlite_engine
 from app.main import create_app
 from app.mihomo import ControllerWriteResult, MihomoVersion, ProxyGroup, Traffic
 from app.models import DashboardOwner
-from app.routes import RuntimeContainer
+from app.routes import RuntimeContainer, _client_ip
 from app.wgeasy import WireGuardClient
 
 
@@ -88,12 +91,28 @@ class FakeCollector:
 def client(tmp_path):
     engine = create_sqlite_engine(tmp_path / "dashboard.sqlite3")
     create_all(engine)
+    host_health_path = tmp_path / "host-health.json"
+    host_health_path.write_text(
+        json.dumps(
+            {
+                "observed_at": "2026-07-19T08:00:00Z",
+                "cpu_usage_percent": 12.5,
+                "load": {"one": 0.25, "five": 0.2, "fifteen": 0.15},
+                "memory": {"total_bytes": 1000, "available_bytes": 750, "swap_total_bytes": 500, "swap_free_bytes": 500},
+                "volume": {"total_bytes": 10000, "available_bytes": 3500},
+                "network": {"rx_errors": 0, "rx_dropped": 3, "tx_errors": 1, "tx_dropped": 0},
+                "containers": [{"name": "vpn-dashboard", "state": "running", "restart_count": 0, "health": "healthy"}],
+            }
+        ),
+        encoding="utf-8",
+    )
     runtime = RuntimeContainer(
         session_factory=create_session_factory(engine),
         wgeasy=FakeWgEasy(),
         mihomo=FakeMihomo(),
         rule_service=FakeRules(),
         collector=FakeCollector(),
+        host_health_path=host_health_path,
     )
     with TestClient(create_app(container=runtime), base_url="https://testserver") as test_client:
         yield test_client
@@ -273,6 +292,100 @@ def test_login_and_all_state_changes_require_a_valid_csrf_header(client: TestCli
 
 def test_anonymous_client_cannot_download_config(client: TestClient) -> None:
     assert client.get("/api/clients/42/config").status_code == 401
+
+
+def test_host_health_is_authenticated_and_exposes_only_safe_host_metrics(client: TestClient) -> None:
+    assert client.get("/api/host-health").status_code == 401
+    bootstrap(client)
+
+    response = client.get("/api/host-health")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "observed_at": "2026-07-19T08:00:00Z",
+        "cpu_usage_percent": 12.5,
+        "load_one": 0.25,
+        "load_five": 0.2,
+        "load_fifteen": 0.15,
+        "memory_total_bytes": 1000,
+        "memory_available_bytes": 750,
+        "swap_total_bytes": 500,
+        "swap_free_bytes": 500,
+        "volume_total_bytes": 10000,
+        "volume_available_bytes": 3500,
+        "network_rx_errors": 0,
+        "network_rx_dropped": 3,
+        "network_tx_errors": 1,
+        "network_tx_dropped": 0,
+        "containers": [{"name": "vpn-dashboard", "state": "running", "restart_count": 0, "health": "healthy"}],
+    }
+
+
+def test_host_health_rejects_non_finite_or_malformed_metrics(client: TestClient, tmp_path) -> None:
+    bootstrap(client)
+    (tmp_path / "host-health.json").write_text(
+        json.dumps(
+            {
+                "observed_at": "2026-07-19T08:00:00Z",
+                "cpu_usage_percent": 12.5,
+                "load": {"one": "NaN", "five": 0.2, "fifteen": 0.15},
+                "memory": {"total_bytes": 1000, "available_bytes": 750, "swap_total_bytes": 500, "swap_free_bytes": 500},
+                "volume": {"total_bytes": 10000, "available_bytes": 3500},
+                "network": {"rx_errors": 0, "rx_dropped": 3, "tx_errors": 1, "tx_dropped": 0},
+                "containers": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert client.get("/api/host-health").status_code == 503
+
+
+def test_dashboard_hides_openapi_and_never_caches_wireguard_secrets(client: TestClient) -> None:
+    bootstrap(client)
+
+    config = client.get("/api/clients/42/config")
+    qr = client.get("/api/clients/42/qr")
+
+    assert client.get("/openapi.json").status_code == 404
+    assert config.headers["cache-control"] == "no-store, private"
+    assert qr.headers["cache-control"] == "no-store, private"
+
+
+def test_dashboard_rejects_untrusted_hosts_and_oversized_request_bodies(client: TestClient) -> None:
+    assert client.get("/api/healthz", headers={"Host": "attacker.invalid"}).status_code == 400
+    assert client.post(
+        "/api/auth/login",
+        content="x" * 65_537,
+        headers={"Content-Type": "application/json", "Content-Length": "65537"},
+    ).status_code == 413
+
+
+def test_client_ip_accepts_forwarded_address_only_from_trusted_proxy() -> None:
+    application = SimpleNamespace(state=SimpleNamespace(trusted_proxy_networks=(ip_network("172.24.0.0/16"),)))
+    trusted_request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/auth/login",
+            "headers": [(b"x-forwarded-for", b"198.51.100.10, 172.24.0.1")],
+            "client": ("172.24.0.1", 54321),
+            "app": application,
+        }
+    )
+    untrusted_request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/auth/login",
+            "headers": [(b"x-forwarded-for", b"198.51.100.10")],
+            "client": ("198.51.100.99", 54321),
+            "app": application,
+        }
+    )
+
+    assert _client_ip(trusted_request) == "198.51.100.10"
+    assert _client_ip(untrusted_request) == "198.51.100.99"
 
 
 def test_validation_errors_do_not_echo_submitted_credentials(client: TestClient) -> None:

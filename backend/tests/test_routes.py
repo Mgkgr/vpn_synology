@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import ipaddress
@@ -757,6 +758,23 @@ def test_rules_catalogue_contains_current_ai_russian_p2p_and_streaming_categorie
     }
     assert rejected.status_code == 422
     assert rejected.json() == {"detail": "invalid managed rule"}
+
+
+def test_openai_uses_the_shared_fallback_by_default_without_overwriting_an_admin_rule(route_parts, tmp_path) -> None:
+    _client, factory = route_parts
+    service = ManagedRuleService(tmp_path / "rules", FakePolicyMihomo(), factory)
+
+    assert asyncio.run(service.ensure_default_openai_fallback()) is True
+    assert asyncio.run(service.ensure_default_openai_fallback()) is False
+
+    assert [(item.kind, item.category, item.action) for item in service.list_policies()] == [
+        ("GEOSITE", "openai", "VPS-FALLBACK"),
+    ]
+    assert (tmp_path / "rules" / "managed-fallback.txt").read_text(encoding="utf-8") == "GEOSITE,openai\n"
+    with factory() as session:
+        event = session.scalar(select(AuditEvent).where(AuditEvent.action == "policy_default_openai"))
+    assert event is not None
+    assert event.actor == "system"
 
 
 def test_manual_probe_reports_busy_state_and_safe_failure_reason(route_parts) -> None:

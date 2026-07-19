@@ -65,6 +65,32 @@ class WgEasyCredentialStatusResponse(BaseModel):
     configured: bool
 
 
+class HostContainerResponse(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    state: str = Field(min_length=1, max_length=64)
+    restart_count: int = Field(ge=0)
+    health: str | None = Field(default=None, max_length=64)
+
+
+class HostHealthResponse(BaseModel):
+    observed_at: datetime
+    cpu_usage_percent: float | None = Field(default=None, ge=0, le=100)
+    load_one: float = Field(ge=0)
+    load_five: float = Field(ge=0)
+    load_fifteen: float = Field(ge=0)
+    memory_total_bytes: int = Field(ge=0)
+    memory_available_bytes: int = Field(ge=0)
+    swap_total_bytes: int = Field(ge=0)
+    swap_free_bytes: int = Field(ge=0)
+    volume_total_bytes: int = Field(ge=0)
+    volume_available_bytes: int = Field(ge=0)
+    network_rx_errors: int = Field(ge=0)
+    network_rx_dropped: int = Field(ge=0)
+    network_tx_errors: int = Field(ge=0)
+    network_tx_dropped: int = Field(ge=0)
+    containers: list[HostContainerResponse]
+
+
 class ClientResponse(BaseModel):
     id: int
     name: str

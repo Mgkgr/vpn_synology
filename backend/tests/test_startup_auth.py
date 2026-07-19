@@ -52,7 +52,8 @@ def test_production_lifespan_keeps_login_endpoint_available(tmp_path) -> None:
             scheduler=_Scheduler(),
             close=engine.dispose,
             container=runtime,
-        )
+        ),
+        trusted_hosts=("testserver",),
     )
 
     with TestClient(application) as client:

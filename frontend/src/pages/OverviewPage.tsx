@@ -18,6 +18,12 @@ export function OverviewPage() {
   })
   const updates = useQuery({ queryKey: ['updates'], queryFn: api.updates })
   const journal = useQuery({ queryKey: ['journal', 'latest'], queryFn: () => api.journal() })
+  const hostHealth = useQuery({
+    queryKey: ['host-health'],
+    queryFn: api.hostHealth,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+  })
   const data = overview.data
   const traffic = realtimeTraffic.data?.points.at(-1) ?? null
   const selectedExit = data?.fallback.selected ?? null
@@ -32,6 +38,15 @@ export function OverviewPage() {
         <section className="services-section" aria-labelledby="services-title">
           <div className="section-heading"><h2 id="services-title">Сервисы</h2><span>проверка доступности</span></div>
           <AsyncState loading={overview.isLoading} error={overview.error} empty={!data?.services.length} emptyLabel="Нет данных.">{data?.services && <table className="data-table"><thead><tr><th>Сервис</th><th>Состояние</th><th>Сведения</th></tr></thead><tbody>{data.services.map((service) => <tr key={service.name}><th scope="row">{service.name}</th><td><Status ok={service.succeeded} /></td><td>{service.status ?? 'нет данных'}{service.latency_ms !== null ? ` · ${service.latency_ms} мс` : ''}</td></tr>)}</tbody></table>}</AsyncState>
+        </section>
+        <section className="panel host-health-panel" aria-labelledby="host-health-title">
+          <div className="section-heading"><div><h2 id="host-health-title">Хост DS923+</h2><span>снимок раз в минуту · {hostHealth.data ? formatDate(hostHealth.data.observed_at) : 'ожидание данных'}</span></div><Status ok={hostHealth.data ? true : null} pending={hostHealth.isLoading} /></div>
+          <AsyncState loading={hostHealth.isLoading} error={hostHealth.error} empty={!hostHealth.data} emptyLabel="Снимок состояния NAS ещё не собран.">
+            {hostHealth.data && <div className="host-health-grid">
+              <dl className="metric-list"><div><dt>CPU</dt><dd>{hostHealth.data.cpu_usage_percent === null ? 'первая точка' : `${hostHealth.data.cpu_usage_percent.toFixed(1)}%`}</dd></div><div><dt>Нагрузка</dt><dd>{hostHealth.data.load_one.toFixed(2)} / {hostHealth.data.load_five.toFixed(2)} / {hostHealth.data.load_fifteen.toFixed(2)}</dd></div><div><dt>Память свободна</dt><dd>{formatBytes(hostHealth.data.memory_available_bytes)} из {formatBytes(hostHealth.data.memory_total_bytes)}</dd></div><div><dt>Swap свободен</dt><dd>{formatBytes(hostHealth.data.swap_free_bytes)} из {formatBytes(hostHealth.data.swap_total_bytes)}</dd></div><div><dt>Том свободен</dt><dd>{formatBytes(hostHealth.data.volume_available_bytes)} из {formatBytes(hostHealth.data.volume_total_bytes)}</dd></div><div><dt>Ошибки сети</dt><dd>{hostHealth.data.network_rx_errors + hostHealth.data.network_tx_errors} · потери {hostHealth.data.network_rx_dropped + hostHealth.data.network_tx_dropped}</dd></div></dl>
+              <table className="data-table compact-host-table"><thead><tr><th>Контейнер</th><th>Состояние</th><th>Перезапуски</th></tr></thead><tbody>{hostHealth.data.containers.map((container) => <tr key={container.name}><th scope="row">{container.name}</th><td><Status ok={container.state === 'running' && (container.health === null || container.health === 'healthy')} /></td><td>{container.restart_count}</td></tr>)}</tbody></table>
+            </div>}
+          </AsyncState>
         </section>
         <section className="exit-rows" aria-label="Выходы fallback-группы">
           <article className="exit-row primary"><div><p className="eyebrow">ВЫХОД</p><h2>Основной: WG-IMP</h2><p>{selectedExit === 'WG-IMP' ? 'выбран fallback-группой.' : 'не выбран fallback-группой.'}</p></div><Status ok={selectedExit === 'WG-IMP' ? true : null} pending={selectedExit !== 'WG-IMP'} /></article>

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import base64
+from ipaddress import ip_network
+import os
 from pathlib import Path
+from stat import S_IMODE
 from urllib.parse import urlsplit
 
 from pydantic import AnyHttpUrl, field_validator
@@ -13,6 +16,13 @@ from app.probe_targets import APPROVED_PROBE_TARGETS, approved_probe_hosts
 
 DELAY_TEST_HOST_ALLOWLIST = approved_probe_hosts()
 DELAY_TEST_URLS = tuple(item.url for item in APPROVED_PROBE_TARGETS if item.default_enabled)
+DEFAULT_TRUSTED_HOSTS = (
+    "roaring.crazedns.ru",
+    "roaring.keenetic.link",
+    "192.168.2.103",
+    "localhost",
+    "127.0.0.1",
+)
 
 
 class Settings(BaseSettings):
@@ -32,6 +42,8 @@ class Settings(BaseSettings):
     database_path: Path = Path("/data/dashboard.sqlite3")
     direct_rules_path: Path = Path("/gateway/rules/direct.txt")
     geodata_dir: Path = Path("/geodata")
+    trusted_proxy_cidrs: tuple[str, ...] = ("172.24.0.0/16",)
+    max_request_body_bytes: int = 65_536
 
     @field_validator("dashboard_bind")
     @classmethod
@@ -82,7 +94,48 @@ class Settings(BaseSettings):
             raise ValueError("delay_test_urls are managed by the dashboard probe catalogue")
         return value
 
+    @field_validator("trusted_proxy_cidrs")
+    @classmethod
+    def validate_trusted_proxy_cidrs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        try:
+            return tuple(str(ip_network(item, strict=False)) for item in value)
+        except ValueError as error:
+            raise ValueError("trusted_proxy_cidrs must contain CIDR networks") from error
+
+    @field_validator("max_request_body_bytes")
+    @classmethod
+    def validate_max_request_body_bytes(cls, value: int) -> int:
+        if not 1024 <= value <= 1_048_576:
+            raise ValueError("max_request_body_bytes must be between 1024 and 1048576")
+        return value
+
     @classmethod
     def from_env(cls) -> "Settings":
         """Build settings from the process environment and safe defaults."""
-        return cls()
+
+        values: dict[str, str] = {}
+        for field_name, environment_name in (
+            ("dashboard_encryption_key", "DASHBOARD_ENCRYPTION_KEY_FILE"),
+            ("mihomo_api_secret", "MIHOMO_API_SECRET_FILE"),
+        ):
+            value = _secret_from_file(environment_name)
+            if value is not None:
+                values[field_name] = value
+        return cls(**values)
+
+
+def _secret_from_file(environment_name: str) -> str | None:
+    configured_path = os.getenv(environment_name)
+    if configured_path is None or not configured_path.strip():
+        return None
+    path = Path(configured_path)
+    try:
+        metadata = path.stat()
+        if not path.is_file() or (os.name != "nt" and S_IMODE(metadata.st_mode) & 0o077):
+            raise ValueError(f"{environment_name} secret file must be owner-only")
+        value = path.read_text(encoding="utf-8").strip("\r\n")
+    except OSError as error:
+        raise ValueError(f"{environment_name} secret file is unavailable") from error
+    if not value:
+        raise ValueError(f"{environment_name} secret file is empty")
+    return value

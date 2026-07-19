@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from ipaddress import ip_network
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import text
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.auth import AuthService, LoginThrottle
 from app.collectors import Collector, register_collector_jobs
@@ -21,7 +23,7 @@ from app.probe_targets import ProbeTargetService
 from app.routes import RuntimeContainer, build_api_router
 from app.rules import RuleService
 from app.services import ServiceProbe
-from app.settings import Settings
+from app.settings import DEFAULT_TRUSTED_HOSTS, Settings
 from app.wgeasy import WgEasyAdapter, WgEasyCredentialVault
 
 
@@ -85,6 +87,8 @@ def create_collector_runtime(settings: Settings | None = None) -> CollectorRunti
         probe_targets=probe_targets,
         policy_rule_service=ManagedRuleService(settings.direct_rules_path.parent, mihomo, session_factory),
         login_throttle=LoginThrottle(session_factory),
+        trusted_proxy_networks=tuple(ip_network(item) for item in settings.trusted_proxy_cidrs),
+        max_request_body_bytes=settings.max_request_body_bytes,
     )
     return CollectorRuntime(collector, AsyncIOScheduler(timezone="UTC"), engine.dispose, container)
 
@@ -93,6 +97,7 @@ def create_app(
     *,
     runtime_factory: Callable[[], CollectorRuntime] = create_collector_runtime,
     container: RuntimeContainer | None = None,
+    trusted_hosts: tuple[str, ...] | None = None,
 ) -> FastAPI:
     """Create an app whose real scheduler is opt-in and whose routes are injectable."""
 
@@ -114,6 +119,16 @@ def create_app(
             app.state.login_throttle = runtime.container.login_throttle or LoginThrottle(
                 runtime.container.session_factory
             )
+            app.state.trusted_proxy_networks = runtime.container.trusted_proxy_networks
+            app.state.max_request_body_bytes = runtime.container.max_request_body_bytes
+            if runtime.container.policy_rule_service is not None:
+                try:
+                    await runtime.container.policy_rule_service.ensure_default_openai_fallback()
+                except Exception:
+                    # A dashboard must remain operable if a legacy gateway does
+                    # not yet expose managed rule providers. The service writes
+                    # a safe audit event explaining the deferred default.
+                    pass
         register_collector_jobs(runtime.scheduler, runtime.collector)
         runtime.scheduler.start()
         app.state.collector = runtime.collector
@@ -124,10 +139,22 @@ def create_app(
             if runtime.close is not None:
                 runtime.close()
 
-    application = FastAPI(title="VPN Dashboard", docs_url=None, redoc_url=None, lifespan=lifespan)
+    application = FastAPI(title="VPN Dashboard", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+    application.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=list(container.trusted_hosts if container is not None else trusted_hosts or DEFAULT_TRUSTED_HOSTS),
+    )
 
     @application.middleware("http")
     async def add_security_headers(request: Request, call_next: Callable[[Request], Any]):
+        content_length = request.headers.get("content-length")
+        maximum_body_bytes = getattr(request.app.state, "max_request_body_bytes", 65_536)
+        try:
+            oversized = content_length is not None and int(content_length) > maximum_body_bytes
+        except ValueError:
+            oversized = True
+        if oversized:
+            return JSONResponse(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, content={"detail": "request too large"})
         response = await call_next(request)
         response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
         response.headers["X-Frame-Options"] = "DENY"
@@ -144,6 +171,8 @@ def create_app(
             csrf_encryption_key=container.csrf_encryption_key,
         )
         application.state.login_throttle = container.login_throttle or LoginThrottle(container.session_factory)
+        application.state.trusted_proxy_networks = container.trusted_proxy_networks
+        application.state.max_request_body_bytes = container.max_request_body_bytes
 
     @application.get("/api/healthz")
     async def healthz() -> dict[str, str]:

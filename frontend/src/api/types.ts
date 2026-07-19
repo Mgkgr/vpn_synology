@@ -33,6 +33,32 @@ export interface Overview {
   fallback: FallbackState
 }
 
+export interface HostContainer {
+  name: string
+  state: string
+  restart_count: number
+  health: string | null
+}
+
+export interface HostHealth {
+  observed_at: string
+  cpu_usage_percent: number | null
+  load_one: number
+  load_five: number
+  load_fifteen: number
+  memory_total_bytes: number
+  memory_available_bytes: number
+  swap_total_bytes: number
+  swap_free_bytes: number
+  volume_total_bytes: number
+  volume_available_bytes: number
+  network_rx_errors: number
+  network_rx_dropped: number
+  network_tx_errors: number
+  network_tx_dropped: number
+  containers: HostContainer[]
+}
+
 export interface ServiceStatus {
   name: string
   observed_at: string

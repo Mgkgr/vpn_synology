@@ -445,7 +445,7 @@ def test_collector_lifespan_registers_and_stops_scheduler_only_when_explicitly_e
             return False
 
     scheduler = Scheduler()
-    app = create_app(runtime_factory=lambda: CollectorRuntime(CollectorStub(), scheduler))
+    app = create_app(runtime_factory=lambda: CollectorRuntime(CollectorStub(), scheduler), trusted_hosts=("testserver",))
     unstarted_client = TestClient(app)
     try:
         assert unstarted_client.get("/api/healthz").json() == {"status": "ok"}

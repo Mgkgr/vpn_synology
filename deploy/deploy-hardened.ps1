@@ -10,6 +10,9 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $sshTarget = "$UserName@$HostName"
 $archive = Join-Path ([System.IO.Path]::GetTempPath()) ("vpn-dashboard-{0}.tar" -f [guid]::NewGuid().ToString('N'))
 $remoteArchive = "/tmp/$(Split-Path -Leaf $archive)"
+$runId = [guid]::NewGuid().ToString('N')
+$remoteStatus = "/tmp/vpn-dashboard-deploy-$runId.status"
+$remoteLog = "/tmp/vpn-dashboard-deploy-$runId.log"
 
 # git archive contains only committed files: dashboard.env, SQLite and backups remain on NAS.
 & git -C $repo diff --quiet HEAD
@@ -27,8 +30,24 @@ try {
   Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
 }
 
-# sudo asks once for the NAS password. The project deploy helper is already allow-listed.
-& ssh -t -p $Port $sshTarget "sudo sh '$ProjectDir/deploy/scripts/prepare-runtime.sh' && sudo /usr/local/sbin/vpn-dashboard-deploy && sudo /usr/local/sbin/vpn-dashboard-status"
-if ($LASTEXITCODE -ne 0) { throw 'Deployment or post-deployment status check failed.' }
+# sudo asks once for preflight; the build then continues independently from SSH.
+& ssh -t -p $Port $sshTarget "sudo sh '$ProjectDir/deploy/scripts/prepare-runtime.sh' && sudo -v && (nohup sudo -n /bin/sh '$ProjectDir/deploy/scripts/run-dashboard-deploy.sh' '$runId' >/dev/null 2>&1 & echo DEPLOY_RUN_ID=$runId)"
+if ($LASTEXITCODE -ne 0) { throw 'Deployment preflight or detached start failed.' }
+
+$deadline = (Get-Date).AddMinutes(15)
+$result = 'RUNNING'
+while ((Get-Date) -lt $deadline) {
+  Start-Sleep -Seconds 5
+  $result = ((& ssh -p $Port $sshTarget "test -f '$remoteStatus' && cat '$remoteStatus' || echo RUNNING" | Select-Object -Last 1).ToString()).Trim()
+  if ($LASTEXITCODE -ne 0) { continue }
+  if ($result -in @('SUCCESS', 'FAILED')) { break }
+}
+
+if ($result -ne 'SUCCESS') {
+  & ssh -p $Port $sshTarget "test -f '$remoteLog' && tail -n 80 '$remoteLog' || true"
+  throw 'Deployment did not complete successfully; the prior dashboard container was started when available.'
+}
+& ssh -t -p $Port $sshTarget "sudo /usr/local/sbin/vpn-dashboard-status"
+if ($LASTEXITCODE -ne 0) { throw 'Deployment completed, but post-deployment status check failed.' }
 
 Write-Output 'RESULT=success'
