@@ -56,6 +56,9 @@ async function request<T>(path: string, init: RequestInit = {}, notifyUnauthoriz
       ? 'Требуется вход в панель.'
       : response.status === 403
         ? 'Сессия истекла. Войдите снова.'
+        : response.status === 503 && path === '/host-health'
+          ? 'Снимок состояния NAS ещё не собран. Запустите задачу DSM «VPN Dashboard — host health». '
+            + 'После первого запуска данные появятся в течение минуты.'
         : 'Операция не выполнена. Попробуйте ещё раз.'
     throw new ApiError(response.status, message)
   }

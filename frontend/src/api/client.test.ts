@@ -18,4 +18,13 @@ describe('клиент защищённого API', () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1)
     removeHandler()
   })
+
+  it('объясняет отсутствие первого снимка NAS вместо общего сообщения об ошибке', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })))
+
+    await expect(api.hostHealth()).rejects.toMatchObject({
+      status: 503,
+      message: expect.stringContaining('Снимок состояния NAS ещё не собран'),
+    })
+  })
 })
