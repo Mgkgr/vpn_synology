@@ -30,8 +30,9 @@ try {
   Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
 }
 
-# sudo asks once for preflight; the build then continues independently from SSH.
-& ssh -t -p $Port $sshTarget "sudo sh '$ProjectDir/deploy/scripts/prepare-runtime.sh' && sudo -v && (nohup sudo -n /bin/sh '$ProjectDir/deploy/scripts/run-dashboard-deploy.sh' '$runId' >/dev/null 2>&1 & echo DEPLOY_RUN_ID=$runId)"
+# The detached child is created by the authenticated root shell itself. A
+# second `sudo -n` after SSH closes would not inherit DSM's TTY-bound timestamp.
+& ssh -t -p $Port $sshTarget "sudo sh '$ProjectDir/deploy/scripts/prepare-runtime.sh' && sudo /bin/sh -c `"nohup /bin/sh '$ProjectDir/deploy/scripts/run-dashboard-deploy.sh' '$runId' >/dev/null 2>&1 &`" && echo DEPLOY_RUN_ID=$runId"
 if ($LASTEXITCODE -ne 0) { throw 'Deployment preflight or detached start failed.' }
 
 $deadline = (Get-Date).AddMinutes(15)
