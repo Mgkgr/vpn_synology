@@ -107,6 +107,7 @@ POLICY_CATEGORIES: tuple[PolicyCategory, ...] = (
     PolicyCategory("GEOSITE", "category-retail-ru", "Ритейл и доставка РФ"),
     PolicyCategory("GEOSITE", "category-gov-ru", "Госуслуги и ведомства РФ"),
     PolicyCategory("GEOSITE", "category-entertainment-ru", "Видео и развлечения РФ"),
+    PolicyCategory("GEOSITE", "kinopoisk", "Кинопоиск"),
     PolicyCategory("GEOSITE", "category-media-ru", "СМИ и медиа РФ"),
     PolicyCategory("GEOSITE", "category-travel-ru", "Путешествия и билеты РФ"),
     PolicyCategory("GEOSITE", "category-medicine-ru", "Медицина и аптеки РФ"),
@@ -154,12 +155,6 @@ _ACTION_FILES = {
     "VPS-FALLBACK": "managed-fallback.txt",
     "WG-IMP": "managed-wg-imp.txt",
     "HY2-NL": "managed-hy2-nl.txt",
-}
-_ACTION_PROVIDERS = {
-    "DIRECT": "managed-direct",
-    "VPS-FALLBACK": "managed-fallback",
-    "WG-IMP": "managed-wg-imp",
-    "HY2-NL": "managed-hy2-nl",
 }
 _LOCKS: dict[Path, threading.Lock] = {}
 _LOCKS_GUARD = threading.Lock()
@@ -329,11 +324,18 @@ class ManagedRuleService:
             self._lock.release()
 
     async def _apply_current(self) -> None:
-        providers = await self._mihomo.rule_providers()
-        names = {getattr(item, "name", None) for item in providers}
-        required = set(_ACTION_PROVIDERS.values())
-        if not required <= names:
-            raise ManagedRuleConfigurationError("managed Mihomo providers are not configured")
+        # Mihomo does not expose an empty ``type: file`` rule-provider through
+        # ``/providers/rules``.  Requiring all four names from that endpoint
+        # therefore prevents the very first managed rule from ever being
+        # written.  The one-time gateway bootstrap creates these exact files;
+        # their presence is the reliable local readiness check.  A failed
+        # controller reload below still restores every file atomically.
+        missing_files = [
+            filename for filename in _ACTION_FILES.values()
+            if not (self._rules_dir / filename).is_file()
+        ]
+        if missing_files:
+            raise ManagedRuleConfigurationError("managed Mihomo rule files are not configured")
         policies = self.list_policies()
         content = {action: _provider_content(policies, action).encode("utf-8") for action in POLICY_ACTIONS}
         previous = {action: _read_or_none(self._rules_dir / filename) for action, filename in _ACTION_FILES.items()}

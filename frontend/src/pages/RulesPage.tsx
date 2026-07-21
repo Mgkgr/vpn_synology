@@ -18,7 +18,7 @@ const routeActions: { value: ManagedRuleInput['action'], title: string, descript
 const russianGeoSiteCategories = new Set([
   'category-bank-ru', 'category-ecommerce-ru', 'category-retail-ru', 'category-gov-ru',
   'category-entertainment-ru', 'category-media-ru', 'category-travel-ru', 'category-medicine-ru',
-  'category-ru', 'ozon', 'wildberries', 'avito', 'sber', 'tbank-ru', 'yandex', 'vk',
+  'category-ru', 'ozon', 'wildberries', 'avito', 'sber', 'tbank-ru', 'yandex', 'kinopoisk', 'vk',
   'mailru-group', 'cdek', 'megafon', 'mts-ru', 'rostelecom', 't2-ru',
 ])
 

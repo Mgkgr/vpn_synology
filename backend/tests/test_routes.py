@@ -721,7 +721,7 @@ def test_rules_catalogue_contains_current_ai_russian_p2p_and_streaming_categorie
     required = {
         ("GEOSITE", "category-ai-!cn"), ("GEOSITE", "microsoft"),
         ("GEOSITE", "category-bank-ru"), ("GEOSITE", "category-ecommerce-ru"),
-        ("GEOSITE", "category-gov-ru"), ("GEOSITE", "ozon"),
+        ("GEOSITE", "category-gov-ru"), ("GEOSITE", "ozon"), ("GEOSITE", "kinopoisk"),
         ("GEOSITE", "sber"), ("GEOIP", "cloudfront"),
         ("GEOSITE", "category-public-tracker"), ("GEOSITE", "category-pt"),
         ("GEOSITE", "tracker"), ("GEOSITE", "category-entertainment"),
@@ -737,6 +737,7 @@ def test_rules_catalogue_contains_current_ai_russian_p2p_and_streaming_categorie
     }
     assert required <= categories
 
+    _prepare_managed_rule_files(tmp_path / "rules")
     client.app.state.runtime.policy_rule_service = ManagedRuleService(tmp_path / "rules", FakePolicyMihomo(), factory)
     created = client.post(
         "/api/rules/policies",
@@ -762,7 +763,11 @@ def test_rules_catalogue_contains_current_ai_russian_p2p_and_streaming_categorie
 
 def test_openai_uses_the_shared_fallback_by_default_without_overwriting_an_admin_rule(route_parts, tmp_path) -> None:
     _client, factory = route_parts
-    service = ManagedRuleService(tmp_path / "rules", FakePolicyMihomo(), factory)
+    rules_dir = tmp_path / "rules"
+    _prepare_managed_rule_files(rules_dir)
+    # Empty file providers are intentionally absent from Mihomo's controller
+    # response until they contain a rule. The first policy must still apply.
+    service = ManagedRuleService(rules_dir, FakeMihomo(), factory)
 
     assert asyncio.run(service.ensure_default_openai_fallback()) is True
     assert asyncio.run(service.ensure_default_openai_fallback()) is False
@@ -770,11 +775,17 @@ def test_openai_uses_the_shared_fallback_by_default_without_overwriting_an_admin
     assert [(item.kind, item.category, item.action) for item in service.list_policies()] == [
         ("GEOSITE", "openai", "VPS-FALLBACK"),
     ]
-    assert (tmp_path / "rules" / "managed-fallback.txt").read_text(encoding="utf-8") == "GEOSITE,openai\n"
+    assert (rules_dir / "managed-fallback.txt").read_text(encoding="utf-8") == "GEOSITE,openai\n"
     with factory() as session:
         event = session.scalar(select(AuditEvent).where(AuditEvent.action == "policy_default_openai"))
     assert event is not None
     assert event.actor == "system"
+
+
+def _prepare_managed_rule_files(rules_dir) -> None:
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    for filename in ("managed-direct.txt", "managed-wg-imp.txt", "managed-hy2-nl.txt", "managed-fallback.txt"):
+        (rules_dir / filename).write_text("", encoding="utf-8")
 
 
 def test_manual_probe_reports_busy_state_and_safe_failure_reason(route_parts) -> None:
