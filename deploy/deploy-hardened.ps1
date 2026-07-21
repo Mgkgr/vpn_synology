@@ -30,9 +30,9 @@ try {
   Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
 }
 
-# The detached child is created by the authenticated root shell itself. A
-# second `sudo -n` after SSH closes would not inherit DSM's TTY-bound timestamp.
-& ssh -t -p $Port $sshTarget "sudo sh '$ProjectDir/deploy/scripts/prepare-runtime.sh' && sudo /bin/sh -c `"nohup /bin/sh '$ProjectDir/deploy/scripts/run-dashboard-deploy.sh' '$runId' >/dev/null 2>&1 &`" && echo DEPLOY_RUN_ID=$runId"
+# The root launcher owns nohup, avoiding quote loss across PowerShell, OpenSSH
+# and DSM's shell. A second `sudo -n` would not inherit the interactive TTY.
+& ssh -t -p $Port $sshTarget "sudo sh '$ProjectDir/deploy/scripts/prepare-runtime.sh' && sudo /bin/sh '$ProjectDir/deploy/scripts/start-dashboard-deploy.sh' '$runId'"
 if ($LASTEXITCODE -ne 0) { throw 'Deployment preflight or detached start failed.' }
 
 $deadline = (Get-Date).AddMinutes(15)

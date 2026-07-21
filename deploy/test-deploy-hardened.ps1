@@ -6,11 +6,11 @@ $source = Get-Content -LiteralPath $scriptPath -Raw
 if ($source -match 'nohup sudo -n') {
   throw 'Detached deploy must not invoke sudo -n after the interactive SSH session closes.'
 }
-if ($source -notmatch 'sudo /bin/sh -c') {
-  throw 'Detached deploy must create the nohup child from the authenticated root shell.'
+if ($source -notmatch 'start-dashboard-deploy\.sh') {
+  throw 'Deploy must invoke the dedicated root launcher instead of nesting a shell command through SSH.'
 }
-if ($source -notmatch 'nohup /bin/sh') {
-  throw 'Detached deploy must use nohup for the root deploy wrapper.'
+if ($source -match 'sudo /bin/sh -c') {
+  throw 'Deploy must not depend on nested shell quoting through PowerShell and OpenSSH.'
 }
 
 Write-Output 'DEPLOY_LAUNCHER_TEST=ok'
