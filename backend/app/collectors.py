@@ -633,10 +633,10 @@ class Collector:
                 )
             )
 
-    async def manual_geo_upgrade(self, actor: str) -> None:
+    async def manual_geo_upgrade(self, actor: str) -> int:
         """Explicitly request Mihomo's GeoData upgrade and audit local metadata around it."""
 
-        await self._geo_upgrade(actor, source="manual")
+        return await self._geo_upgrade(actor, source="manual")
 
     async def scheduled_geo_upgrade(self) -> None:
         """Run the daily GeoData refresh owned by the dashboard scheduler."""
@@ -659,7 +659,7 @@ class Collector:
         await self._geo_upgrade("scheduler", source="catchup")
         return True
 
-    async def _geo_upgrade(self, actor: str, *, source: str) -> None:
+    async def _geo_upgrade(self, actor: str, *, source: str) -> int:
         """Serialize manual and scheduled upgrades to keep their audit trail unambiguous."""
 
         actor = _safe_actor(actor)
@@ -713,6 +713,7 @@ class Collector:
                         detail=None,
                     )
                 )
+            return update_id
 
     async def _collect_peers(self, observed_at: datetime) -> None:
         try:

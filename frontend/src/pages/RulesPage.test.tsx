@@ -12,7 +12,7 @@ afterEach(() => {
 
 describe('RulesPage', () => {
   it('обновляет GeoSite и GeoIP прямо из раздела правил и объясняет GeoIP-категории', async () => {
-    const updateGeo = vi.spyOn(api, 'updateGeo').mockResolvedValue()
+    const updateGeo = vi.spyOn(api, 'updateGeo').mockResolvedValue({ id: 1, observed_at: '2026-07-21T19:59:00Z', source: 'manual', operation: 'geo_upgrade', succeeded: true, status_code: 204, version: null, verification: 'unchanged', checked_files: ['GeoIP.dat', 'GeoSite.dat'], changed_files: [] })
     vi.spyOn(api, 'rules').mockResolvedValue({
       rules: [], providers: [], direct_text: '', policies: [],
       policy_catalog: [
@@ -28,7 +28,7 @@ describe('RulesPage', () => {
     expect(screen.getByText('Срабатывает по IP назначения; CDN может выбрать другой регион.')).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: 'Обновить GeoSite / GeoIP' }))
     await waitFor(() => expect(updateGeo).toHaveBeenCalledOnce())
-    expect(screen.getByText('Запрос на обновление принят. Автоматически — каждый день в 04:00.')).toBeVisible()
+    expect(screen.getByText('Готово: GeoIP.dat, GeoSite.dat уже актуальны. HTTP 204.')).toBeVisible()
   })
 
   it('показывает отдельный статус до загрузки GeoSite, GeoIP и правил Mihomo', () => {

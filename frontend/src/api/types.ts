@@ -197,10 +197,14 @@ export interface DirectRulesResult {
 export interface GeoUpdate {
   id: number
   observed_at: string
+  source: string
   operation: string | null
   succeeded: boolean | null
   status_code: number | null
   version: string | null
+  verification: 'pending' | 'failed' | 'snapshot' | 'unavailable' | 'changed' | 'unchanged'
+  checked_files: string[]
+  changed_files: string[]
 }
 
 export interface GeoAsset {

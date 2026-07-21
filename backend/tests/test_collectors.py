@@ -515,13 +515,14 @@ def test_manual_geo_upgrade_records_before_and_after_without_controller_payload(
             geodata_dir=geodata_dir,
         )
 
-        run(collector.manual_geo_upgrade("admin"))
+        update_id = run(collector.manual_geo_upgrade("admin"))
 
         with factory() as session:
             update = session.scalars(select(GeoUpdate)).one()
             metadata = session.scalars(select(GeoFileMetadata).order_by(GeoFileMetadata.phase)).all()
             audit = session.scalars(select(AuditEvent).where(AuditEvent.action == "geo_upgrade")).one()
         assert mihomo.geo_upgrade_calls == 1
+        assert update_id == update.id
         assert (update.source, update.operation, update.succeeded, update.status_code) == (
             "manual",
             "geo_upgrade",

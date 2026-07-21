@@ -657,6 +657,68 @@ def test_updates_returns_current_geodata_files_with_their_last_observed_time(rou
     ]
 
 
+def test_manual_geo_update_returns_a_verified_file_outcome(route_parts) -> None:
+    client, factory = route_parts
+    observed_at = datetime(2026, 7, 21, 19, 59, tzinfo=UTC)
+    with factory.begin() as session:
+        update = GeoUpdate(
+            observed_at=observed_at,
+            source="manual",
+            operation="geo_upgrade",
+            succeeded=True,
+            status_code=204,
+            error_text=None,
+            version=None,
+            detail=None,
+        )
+        session.add(update)
+        session.flush()
+        session.add_all(
+            [
+                GeoFileMetadata(
+                    geo_update_id=update.id,
+                    phase="before",
+                    filename="GeoIP.dat",
+                    size_bytes=10,
+                    modified_at=observed_at,
+                    sha256="a" * 64,
+                ),
+                GeoFileMetadata(
+                    geo_update_id=update.id,
+                    phase="after",
+                    filename="GeoIP.dat",
+                    size_bytes=12,
+                    modified_at=observed_at,
+                    sha256="b" * 64,
+                ),
+            ]
+        )
+        update_id = update.id
+
+    class CompletedGeoCollector:
+        async def manual_geo_upgrade(self, actor: str) -> int:
+            assert actor == "owner"
+            return update_id
+
+    client.app.state.runtime.collector = CompletedGeoCollector()
+
+    response = client.post("/api/updates/geo", headers=csrf(client))
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": update_id,
+        "observed_at": "2026-07-21T19:59:00Z",
+        "source": "manual",
+        "operation": "geo_upgrade",
+        "succeeded": True,
+        "status_code": 204,
+        "version": None,
+        "verification": "changed",
+        "checked_files": ["GeoIP.dat"],
+        "changed_files": ["GeoIP.dat"],
+    }
+
+
 def test_updates_includes_direct_and_managed_rule_audit(route_parts) -> None:
     client, factory = route_parts
     observed_at = datetime(2026, 7, 14, 10, tzinfo=UTC)

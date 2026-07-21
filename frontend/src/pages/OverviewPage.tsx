@@ -63,7 +63,7 @@ export function OverviewPage() {
           <section className="panel geo-panel" aria-labelledby="geo-title">
             <div className="section-heading"><h2 id="geo-title">GeoIP / GeoSite</h2></div>
             <AsyncState loading={updates.isLoading} error={updates.error} empty={!updates.data?.updates.length} emptyLabel="Обновления геоданных ещё не зафиксированы.">
-              {updates.data?.updates[0] && <dl className="metric-list"><div><dt>Последняя операция</dt><dd>{updates.data.updates[0].operation ?? 'Geo update'}</dd></div><div><dt>Дата</dt><dd>{formatDate(updates.data.updates[0].observed_at)}</dd></div><div><dt>Версия</dt><dd>{updates.data.updates[0].version ?? 'не указана'}</dd></div><div><dt>Результат</dt><dd><Status ok={updates.data.updates[0].succeeded} /></dd></div></dl>}
+              {updates.data?.updates[0] && <dl className="metric-list"><div><dt>Последняя операция</dt><dd>{updates.data.updates[0].operation ?? 'Geo update'}</dd></div><div><dt>Дата</dt><dd>{formatDate(updates.data.updates[0].observed_at)}</dd></div><div><dt>Проверка</dt><dd>{overviewGeoResult(updates.data.updates[0])}</dd></div><div><dt>Результат</dt><dd><Status ok={updates.data.updates[0].succeeded} pending={updates.data.updates[0].succeeded === null} /></dd></div></dl>}
             </AsyncState>
           </section>
         </div>
@@ -80,6 +80,14 @@ export function OverviewPage() {
       </AsyncState>
     </main>
   )
+}
+
+function overviewGeoResult(update: { verification: string; changed_files: string[]; checked_files: string[] }): string {
+  if (update.verification === 'changed') return `изменены: ${update.changed_files.join(', ')}`
+  if (update.verification === 'unchanged') return 'файлы уже актуальны'
+  if (update.verification === 'unavailable') return 'файлы не удалось проверить'
+  if (update.verification === 'pending') return 'выполняется'
+  return update.verification === 'failed' ? 'ошибка, прежние файлы сохранены' : 'снимок файлов сохранён'
 }
 
 function ClientTable({ clients }: { clients: { id: number; name: string; ipv4_address: string; enabled: boolean; latest_handshake_at: string | null; received_bytes: number; transmitted_bytes: number }[] }) {

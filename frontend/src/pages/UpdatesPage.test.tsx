@@ -29,4 +29,30 @@ describe('UpdatesPage', () => {
     expect(screen.getByText('GEOSITE: openai')).toBeVisible()
     expect(screen.getByText('admin')).toBeVisible()
   })
+
+  it('объясняет итог ручного обновления по фактически изменённым файлам', async () => {
+    vi.spyOn(api, 'updates').mockResolvedValue({
+      assets: [],
+      rule_changes: [],
+      updates: [{
+        id: 8,
+        observed_at: '2026-07-21T19:59:00Z',
+        source: 'manual',
+        operation: 'geo_upgrade',
+        succeeded: true,
+        status_code: 204,
+        version: null,
+        verification: 'changed',
+        checked_files: ['GeoIP.dat', 'GeoSite.dat'],
+        changed_files: ['GeoIP.dat', 'GeoSite.dat'],
+      }],
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    render(<QueryClientProvider client={client}><UpdatesPage /></QueryClientProvider>)
+
+    expect(await screen.findByText('Готово: файлы обновлены')).toBeVisible()
+    expect(screen.getByText('Изменены: GeoIP.dat, GeoSite.dat')).toBeVisible()
+    expect(screen.getByText('вручную')).toBeVisible()
+  })
 })

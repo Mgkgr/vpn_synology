@@ -286,10 +286,14 @@ class ManagedRulePolicyRequest(_StrictModel):
 class GeoUpdateResponse(BaseModel):
     id: int
     observed_at: datetime
+    source: str
     operation: str | None
     succeeded: bool | None
     status_code: int | None
     version: str | None
+    verification: str
+    checked_files: list[str] = Field(default_factory=list)
+    changed_files: list[str] = Field(default_factory=list)
 
 
 class GeoAssetResponse(BaseModel):

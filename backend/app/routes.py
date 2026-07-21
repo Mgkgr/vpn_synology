@@ -657,8 +657,13 @@ def build_api_router() -> APIRouter:
             current_assets, assets_error = (), "GeoData metadata is unavailable"
         with runtime.session_factory() as session:
             rows = session.scalars(select(GeoUpdate).order_by(GeoUpdate.id.desc()).limit(100)).all()
-            metadata_rows = session.execute(
+            metadata_observations = session.execute(
                 select(GeoFileMetadata.filename, GeoUpdate.observed_at)
+                .join(GeoUpdate, GeoUpdate.id == GeoFileMetadata.geo_update_id)
+                .order_by(GeoFileMetadata.id.desc())
+            ).all()
+            metadata_rows = session.scalars(
+                select(GeoFileMetadata)
                 .join(GeoUpdate, GeoUpdate.id == GeoFileMetadata.geo_update_id)
                 .order_by(GeoFileMetadata.id.desc())
             ).all()
@@ -668,7 +673,10 @@ def build_api_router() -> APIRouter:
                 .order_by(AuditEvent.id.desc())
                 .limit(100)
             ).all()
-        last_observed = {filename: observed_at for filename, observed_at in reversed(metadata_rows)}
+        last_observed = {filename: observed_at for filename, observed_at in reversed(metadata_observations)}
+        metadata_by_update: dict[int, list[GeoFileMetadata]] = {}
+        for item in metadata_rows:
+            metadata_by_update.setdefault(item.geo_update_id, []).append(item)
         return UpdatesResponse(
             assets=[
                 GeoAssetResponse(
@@ -683,14 +691,7 @@ def build_api_router() -> APIRouter:
             ],
             assets_error=assets_error,
             updates=[
-                GeoUpdateResponse(
-                    id=row.id,
-                    observed_at=row.observed_at,
-                    operation=row.operation,
-                    succeeded=row.succeeded,
-                    status_code=row.status_code,
-                    version=row.version,
-                )
+                _geo_update_response(row, metadata_by_update.get(row.id, []))
                 for row in rows
             ],
             rule_changes=[
@@ -706,20 +707,32 @@ def build_api_router() -> APIRouter:
             ],
         )
 
-    @router.post("/updates/geo", status_code=status.HTTP_202_ACCEPTED)
+    @router.post("/updates/geo", response_model=GeoUpdateResponse)
     async def update_geo(
         request: Request,
         principal: AuthenticatedSession = Depends(require_admin),
-    ) -> Response:
+    ) -> Response | GeoUpdateResponse:
         _require_csrf(request, principal)
         runtime = _runtime(request)
         try:
-            await runtime.collector.manual_geo_upgrade(principal.username)
+            update_id = await runtime.collector.manual_geo_upgrade(principal.username)
         except Exception as error:
             _write_audit(runtime, principal.username, "geo_upgrade", succeeded=False)
             raise _upstream_failure() from error
         _write_audit(runtime, principal.username, "geo_upgrade", succeeded=True)
-        return Response(status_code=status.HTTP_202_ACCEPTED)
+        if not isinstance(update_id, int):
+            # Compatibility with constrained test and legacy collector adapters.
+            return Response(status_code=status.HTTP_202_ACCEPTED)
+        with runtime.session_factory() as session:
+            row = session.get(GeoUpdate, update_id)
+            metadata = session.scalars(
+                select(GeoFileMetadata)
+                .where(GeoFileMetadata.geo_update_id == update_id)
+                .order_by(GeoFileMetadata.id)
+            ).all()
+        if row is None:
+            raise _upstream_failure()
+        return _geo_update_response(row, metadata)
 
     @router.get("/traffic", response_model=TrafficUsagePeriodResponse)
     async def traffic_usage(
@@ -1077,6 +1090,45 @@ def _policy_response(item: Any) -> ManagedRulePolicyResponse:
         label=_safe_required(getattr(item, "label", None)),
         action=_safe_required(getattr(item, "action", None)),
         enabled=bool(getattr(item, "enabled", False)),
+    )
+
+
+def _geo_update_response(row: GeoUpdate, metadata: list[GeoFileMetadata]) -> GeoUpdateResponse:
+    """Summarise the before/after file snapshots without exposing full hashes."""
+
+    before = {item.filename: item for item in metadata if item.phase == "before"}
+    after = {item.filename: item for item in metadata if item.phase == "after"}
+    checked_files = sorted(set(before) | set(after))
+    changed_files = sorted(
+        filename
+        for filename in checked_files
+        if filename not in before
+        or filename not in after
+        or before[filename].size_bytes != after[filename].size_bytes
+        or before[filename].modified_at != after[filename].modified_at
+        or before[filename].sha256 != after[filename].sha256
+    )
+    if row.succeeded is None:
+        verification = "pending"
+    elif not row.succeeded:
+        verification = "failed"
+    elif row.operation != "geo_upgrade":
+        verification = "snapshot"
+    elif not after:
+        verification = "unavailable"
+    else:
+        verification = "changed" if changed_files else "unchanged"
+    return GeoUpdateResponse(
+        id=row.id,
+        observed_at=row.observed_at,
+        source=row.source,
+        operation=row.operation,
+        succeeded=row.succeeded,
+        status_code=row.status_code,
+        version=row.version,
+        verification=verification,
+        checked_files=checked_files,
+        changed_files=changed_files,
     )
 
 

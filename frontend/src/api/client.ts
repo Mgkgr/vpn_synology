@@ -21,6 +21,7 @@ import type {
   ManagedRulePolicy,
   ProbeDiagnosis,
   HostHealth,
+  GeoUpdate,
 } from './types'
 
 export class ApiError extends Error {
@@ -119,7 +120,7 @@ export const api = {
   updateManagedRule: (id: number, payload: ManagedRuleInput) => request<ManagedRulePolicy>(`/rules/policies/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteManagedRule: (id: number) => request<void>(`/rules/policies/${id}`, { method: 'DELETE' }),
   updates: () => request<UpdatesResponse>('/updates'),
-  updateGeo: () => request<void>('/updates/geo', { method: 'POST' }),
+  updateGeo: () => request<GeoUpdate>('/updates/geo', { method: 'POST' }),
   probeTargets: () => request<ProbeTarget[]>('/probes/targets'),
   updateProbeTargets: (targets: Pick<ProbeTarget, 'key' | 'enabled'>[]) => request<ProbeTarget[]>('/probes/targets', {
     method: 'PUT',

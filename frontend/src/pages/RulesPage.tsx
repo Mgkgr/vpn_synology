@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '../api/client'
-import type { ManagedRuleInput, ManagedRulePolicy } from '../api/types'
+import type { GeoUpdate, ManagedRuleInput, ManagedRulePolicy } from '../api/types'
 import { AsyncState } from '../components/AsyncState'
 
 type PolicyKind = 'GEOSITE' | 'GEOIP'
@@ -110,6 +110,7 @@ export function RulesPage() {
   const [newKind, setNewKind] = useState<PolicyKind>('GEOSITE')
   const [newCategory, setNewCategory] = useState('openai')
   const [newAction, setNewAction] = useState<ManagedRuleInput['action']>('VPS-FALLBACK')
+  const [geoPhase, setGeoPhase] = useState<'idle' | 'request' | 'verify'>('idle')
   const queryClient = useQueryClient()
   const rules = useQuery({ queryKey: ['rules'], queryFn: api.rules })
   const apply = useMutation({
@@ -123,7 +124,16 @@ export function RulesPage() {
   const updatePolicy = useMutation({ mutationFn: ({ id, payload }: { id: number, payload: ManagedRuleInput }) => api.updateManagedRule(id, payload), onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['rules'] }) })
   const deletePolicy = useMutation({ mutationFn: api.deleteManagedRule, onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['rules'] }) })
   const upgradeGeo = useMutation({
-    mutationFn: api.updateGeo,
+    mutationFn: async () => {
+      setGeoPhase('request')
+      const timer = window.setTimeout(() => setGeoPhase('verify'), 800)
+      try {
+        return await api.updateGeo()
+      } finally {
+        window.clearTimeout(timer)
+        setGeoPhase('idle')
+      }
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['rules'] })
       void queryClient.invalidateQueries({ queryKey: ['updates'] })
@@ -146,7 +156,7 @@ export function RulesPage() {
     if (!newCategoryOptions.some((item) => item.category === newCategory)) setNewCategory(newCategoryOptions[0]?.category ?? '')
   }, [newKind, newCategory, newCategoryOptions])
 
-  return <main className="page"><header className="page-header"><div><p className="eyebrow">04 / ПРАВИЛА MIHOMO</p><h1>Правила</h1><p>Изменения DIRECT проходят предварительный просмотр до применения.</p>{rules.isLoading && <p className="loading-hint" role="status">Загружаем GeoSite, GeoIP и правила Mihomo…</p>}</div><div><button className="primary-button" type="button" onClick={() => upgradeGeo.mutate()} disabled={upgradeGeo.isPending}>{upgradeGeo.isPending ? 'Обновление…' : 'Обновить GeoSite / GeoIP'}</button>{upgradeGeo.error && <p className="form-error" role="alert">{upgradeGeo.error.message}</p>}{upgradeGeo.isSuccess && <p className="success-message">Запрос на обновление принят. Автоматически — каждый день в 04:00.</p>}</div></header>
+  return <main className="page"><header className="page-header"><div><p className="eyebrow">04 / ПРАВИЛА MIHOMO</p><h1>Правила</h1><p>Изменения DIRECT проходят предварительный просмотр до применения.</p>{rules.isLoading && <p className="loading-hint" role="status">Загружаем GeoSite, GeoIP и правила Mihomo…</p>}</div><div><button className="primary-button" type="button" onClick={() => upgradeGeo.mutate()} disabled={upgradeGeo.isPending}>{geoPhase === 'request' ? 'Отправляем запрос Mihomo…' : geoPhase === 'verify' ? 'Проверяем GeoSite / GeoIP…' : 'Обновить GeoSite / GeoIP'}</button>{upgradeGeo.isPending && <p className="loading-hint" role="status">{geoPhase === 'verify' ? 'Mihomo ответил, сверяем файлы GeoData на шлюзе…' : 'Запускаем обновление GeoData в Mihomo…'}</p>}{upgradeGeo.error && <p className="form-error" role="alert">{upgradeGeo.error.message}</p>}{upgradeGeo.isSuccess && <p className="success-message">{geoUpdateSummary(upgradeGeo.data)}</p>}</div></header>
     <section className="panel policy-panel" aria-labelledby="policy-title"><div className="section-heading"><div><h2 id="policy-title">Маршрутизация GeoSite / GeoIP</h2><span>Выберите направление, назначьте ему маршрут и добавьте правило.</span></div></div><div className="policy-composer"><section className="policy-step" aria-labelledby="policy-category-title"><div className="policy-step-heading"><span>1</span><div><h3 id="policy-category-title">Куда направлять</h3><p>Готовые направления из активных списков MetaCubeX.</p></div></div><CategoryPicker catalog={policyCatalog} kind={newKind} category={newCategory} onPick={(item) => { setNewKind(item.kind); setNewCategory(item.category) }} /></section><section className="policy-step" aria-labelledby="policy-action-title"><div className="policy-step-heading"><span>2</span><div><h3 id="policy-action-title">Как направлять</h3><p>Выберите автоматический VPN, конкретный выход или DIRECT.</p></div></div><RouteActionPicker value={newAction} onChange={setNewAction} /></section><div className="policy-advanced"><label>Расширенный выбор <select aria-label="Тип нового правила" value={newKind} onChange={(event) => setNewKind(event.target.value as PolicyKind)}><option value="GEOSITE">GeoSite</option><option value="GEOIP">GeoIP</option></select><select aria-label="Категория нового правила" value={newCategory} onChange={(event) => setNewCategory(event.target.value)}>{newCategoryOptions.map((item) => <option value={item.category} key={`${item.kind}-${item.category}`}>{item.label}</option>)}</select></label><button className="primary-button" type="button" disabled={!newCategory || createPolicy.isPending} onClick={() => createPolicy.mutate({ kind: newKind, category: newCategory, action: newAction, enabled: true })}>{createPolicy.isPending ? 'Добавление…' : 'Добавить правило'}</button></div></div>{createPolicy.error && <p className="form-error policy-error" role="alert">{createPolicy.error.message}</p>}<div className="policy-table-wrap"><AsyncState loading={rules.isLoading} error={rules.error} empty={!(rules.data?.policies?.length)} emptyLabel="Категорий пока нет. Добавьте нужный маршрут выше."><table className="data-table"><thead><tr><th>Категория</th><th>Маршрут</th><th>Активно</th><th><span className="sr-only">Действия</span></th></tr></thead><tbody>{(rules.data?.policies ?? []).map((policy) => <PolicyRow key={policy.id} policy={policy} catalog={policyCatalog} pending={updatePolicy.isPending || deletePolicy.isPending} onSave={(id, payload) => updatePolicy.mutate({ id, payload })} onDelete={(id) => deletePolicy.mutate(id)} />)}</tbody></table></AsyncState></div></section>
     <div className="rules-layout">
       <section className="panel editor-panel" aria-labelledby="direct-title"><div className="section-heading"><h2 id="direct-title">Свой DIRECT-список</h2><span>по одному правилу в строке</span></div><label className="sr-only" htmlFor="direct-rules">Правила DIRECT</label><textarea id="direct-rules" value={text} onChange={(event) => setText(event.target.value)} placeholder="DOMAIN-SUFFIX,example.local,DIRECT\nIP-CIDR,192.168.0.0/16,DIRECT" disabled={loadedText === null} /><div className="diff-grid"><div><h3>Добавится</h3>{additions.length ? <ul>{additions.map((line) => <li key={line}>+ {line}</li>)}</ul> : <p>Нет изменений.</p>}</div><div><h3>Будет удалено</h3>{removals.length ? <ul>{removals.map((line) => <li key={line}>− {line}</li>)}</ul> : <p>Нет изменений.</p>}</div></div>{apply.error && <p className="form-error" role="alert">{apply.error.message}</p>}{apply.data && <p className="success-message">Применена ревизия #{apply.data.revision_number}.</p>}<button className="primary-button" type="button" disabled={!canApply} onClick={() => apply.mutate(text)}>{apply.isPending ? 'Применение…' : 'Применить DIRECT-правила'}</button></section>
@@ -154,4 +164,12 @@ export function RulesPage() {
     </div>
     <section className="panel" aria-labelledby="active-rules-title"><div className="section-heading"><h2 id="active-rules-title">Активные правила контроллера</h2><span>только фактически загруженные строки</span></div><AsyncState loading={rules.isLoading} error={rules.error} empty={!rules.data?.rules.length} emptyLabel="Контроллер не вернул правил.">{rules.data && <table className="data-table"><thead><tr><th>Тип</th><th>Payload</th><th>Выход</th></tr></thead><tbody>{rules.data.rules.map((rule, index) => <tr key={`${rule.type}-${rule.payload}-${index}`}><td>{rule.type}</td><th scope="row">{rule.payload}</th><td>{rule.proxy}</td></tr>)}</tbody></table>}</AsyncState></section>
   </main>
+}
+
+function geoUpdateSummary(update: GeoUpdate | undefined): string {
+  if (!update) return 'Запрос принят. Mihomo завершит обновление GeoData, а результат появится в истории.'
+  if (update.verification === 'changed') return `Готово: изменены ${update.changed_files.join(', ')}. HTTP ${update.status_code ?? '—'}.`
+  if (update.verification === 'unchanged') return `Готово: ${update.checked_files.join(', ') || 'GeoData'} уже актуальны. HTTP ${update.status_code ?? '—'}.`
+  if (update.verification === 'unavailable') return `Mihomo ответил HTTP ${update.status_code ?? '—'}, но файлы GeoData после обновления недоступны для проверки.`
+  return 'Обновление завершилось с ошибкой; прежние GeoData сохранены.'
 }
