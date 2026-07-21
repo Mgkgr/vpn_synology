@@ -1,5 +1,5 @@
 #!/bin/sh
-# Root-only detached wrapper. It preserves a diagnostic log and a tiny status
+# Root-only foreground wrapper. It preserves a diagnostic log and a tiny status
 # file so a transient SSH reset cannot be mistaken for a failed Docker build.
 set -eu
 
@@ -20,8 +20,20 @@ touch "$LOG_FILE"
 chown "$RUN_OWNER" "$STATUS_FILE" "$LOG_FILE"
 chmod 0600 "$STATUS_FILE" "$LOG_FILE"
 
+write_status() {
+  printf '%s\n' "$1" > "$STATUS_FILE"
+}
+
+# DSM may terminate a foreground child when its SSH transport is lost. Mark
+# that outcome explicitly rather than leaving a stale RUNNING state behind.
+on_signal() {
+  write_status 'FAILED'
+  exit 1
+}
+trap on_signal HUP INT TERM
+
 if /usr/local/sbin/vpn-dashboard-deploy > "$LOG_FILE" 2>&1; then
-  printf 'SUCCESS\n' > "$STATUS_FILE"
+  write_status 'SUCCESS'
   exit 0
 fi
 
@@ -30,5 +42,5 @@ fi
 if "$DOCKER_BIN" inspect vpn-dashboard >/dev/null 2>&1; then
   "$DOCKER_BIN" start vpn-dashboard >/dev/null 2>&1 || true
 fi
-printf 'FAILED\n' > "$STATUS_FILE"
+write_status 'FAILED'
 exit 1

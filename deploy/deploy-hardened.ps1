@@ -30,23 +30,31 @@ try {
   Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
 }
 
-# The root launcher owns nohup, avoiding quote loss across PowerShell, OpenSSH
-# and DSM's shell. A second `sudo -n` would not inherit the interactive TTY.
-& ssh -t -p $Port $sshTarget "sudo sh '$ProjectDir/deploy/scripts/prepare-runtime.sh' && sudo /bin/sh '$ProjectDir/deploy/scripts/start-dashboard-deploy.sh' '$runId'"
-if ($LASTEXITCODE -ne 0) { throw 'Deployment preflight or detached start failed.' }
+# DSM terminates child processes detached from an SSH session. Run the root
+# wrapper in the authenticated foreground session instead; it writes a status
+# marker and keeps the previous container available after a failed build.
+Write-Output 'DEPLOYMENT=running (the SSH session will remain open until Docker finishes)'
+& ssh -t -p $Port $sshTarget "sudo sh '$ProjectDir/deploy/scripts/prepare-runtime.sh' && sudo /bin/sh '$ProjectDir/deploy/scripts/run-dashboard-deploy.sh' '$runId'"
+$deployExitCode = $LASTEXITCODE
 
-$deadline = (Get-Date).AddMinutes(15)
+# A transient SSH reset can happen after the remote process finishes. The
+# root wrapper's status marker is therefore authoritative, not SSH's exit code.
+$deadline = (Get-Date).AddMinutes(2)
 $result = 'RUNNING'
 while ((Get-Date) -lt $deadline) {
-  Start-Sleep -Seconds 5
-  $result = ((& ssh -p $Port $sshTarget "test -f '$remoteStatus' && cat '$remoteStatus' || echo RUNNING" | Select-Object -Last 1).ToString()).Trim()
-  if ($LASTEXITCODE -ne 0) { continue }
+  $statusOutput = & ssh -T -p $Port $sshTarget "test -f '$remoteStatus' && cat '$remoteStatus' || echo RUNNING"
+  if ($LASTEXITCODE -ne 0 -or -not $statusOutput) {
+    Start-Sleep -Seconds 3
+    continue
+  }
+  $result = (($statusOutput | Select-Object -Last 1).ToString()).Trim()
   if ($result -in @('SUCCESS', 'FAILED')) { break }
+  Start-Sleep -Seconds 3
 }
 
 if ($result -ne 'SUCCESS') {
-  & ssh -p $Port $sshTarget "test -f '$remoteLog' && tail -n 80 '$remoteLog' || true"
-  throw 'Deployment did not complete successfully; the prior dashboard container was started when available.'
+  & ssh -T -p $Port $sshTarget "test -f '$remoteLog' && tail -n 80 '$remoteLog' || true"
+  throw "Deployment did not complete successfully (SSH exit code: $deployExitCode); the prior dashboard container was started when available."
 }
 & ssh -t -p $Port $sshTarget "sudo /usr/local/sbin/vpn-dashboard-status"
 if ($LASTEXITCODE -ne 0) { throw 'Deployment completed, but post-deployment status check failed.' }
