@@ -40,6 +40,29 @@ describe('RulesPage', () => {
     expect(screen.getByText('Загружаем GeoSite, GeoIP и правила Mihomo…')).toBeVisible()
   })
 
+  it('подтверждает добавленное правило после потери браузером ответа на reload Mihomo', async () => {
+    let rulesCalls = 0
+    vi.spyOn(api, 'rules').mockImplementation(async () => {
+      rulesCalls += 1
+      return {
+        rules: [], providers: [], direct_text: '',
+        policy_catalog: [{ kind: 'GEOSITE', category: 'kinopoisk', label: 'Кинопоиск' }],
+        policies: rulesCalls > 1 ? [{ id: 4, kind: 'GEOSITE', category: 'kinopoisk', label: 'Кинопоиск', action: 'VPS-FALLBACK', enabled: true }] : [],
+      }
+    })
+    vi.spyOn(api, 'createManagedRule').mockRejectedValue(new TypeError('Failed to fetch'))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    render(<QueryClientProvider client={client}><RulesPage /></QueryClientProvider>)
+
+    await screen.findByRole('button', { name: /Кинопоиск/ })
+    fireEvent.change(screen.getByLabelText('Категория нового правила'), { target: { value: 'kinopoisk' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Добавить правило' }))
+
+    expect(await screen.findByText('Правило применено. Браузер потерял ответ при перезагрузке Mihomo, но состояние подтверждено.', {}, { timeout: 3_000 })).toBeVisible()
+    expect(screen.queryByText('Failed to fetch')).not.toBeInTheDocument()
+  })
+
   it('ждёт точный загруженный DIRECT-файл и не применяет неизменённый текст', async () => {
     let resolveRules: ((value: Awaited<ReturnType<typeof api.rules>>) => void) | undefined
     vi.spyOn(api, 'rules').mockReturnValue(new Promise((resolve) => { resolveRules = resolve }))

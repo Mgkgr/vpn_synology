@@ -14,15 +14,8 @@ $snapshot = "$ProjectDir/deploy/data/host-health.json"
 # and five fixed container states, then writes a non-secret JSON snapshot for
 # the unprivileged dashboard user. The Task Scheduler configuration remains a
 # DSM-owned setting and is described in docs/operations.md.
-& ssh -t -p $Port $sshTarget "test -f '$collector' && sudo /bin/sh '$collector'"
+& ssh -t -p $Port $sshTarget "sudo /bin/sh '$collector' && sudo stat -c 'SNAPSHOT_MTIME=%y`nSNAPSHOT_SIZE=%s`nSNAPSHOT_MODE=%a' '$snapshot'"
 if ($LASTEXITCODE -ne 0) {
   throw 'Initial DS923+ health snapshot failed. Check the sudo password and the Container Manager installation.'
 }
-
-$metadata = & ssh -T -p $Port $sshTarget "stat -c 'SNAPSHOT_MTIME=%y`nSNAPSHOT_SIZE=%s`nSNAPSHOT_MODE=%a' '$snapshot'"
-if ($LASTEXITCODE -ne 0) {
-  throw 'The collector completed, but the host-health snapshot was not found.'
-}
-
-$metadata
 Write-Output 'RESULT=success'

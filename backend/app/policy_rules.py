@@ -259,6 +259,17 @@ class ManagedRuleService:
         try:
             now = datetime.now(UTC)
             with self._session_factory.begin() as session:
+                existing = session.scalar(
+                    select(ManagedRulePolicy).where(
+                        ManagedRulePolicy.kind == kind,
+                        ManagedRulePolicy.category == category,
+                    )
+                )
+                # A browser can lose its response while Mihomo reloads. Treat
+                # a retry of the same category as a successful idempotent
+                # create, rather than writing a duplicate provider rule.
+                if existing is not None:
+                    return _to_policy(existing)
                 row = ManagedRulePolicy(kind=kind, category=category, action=action, enabled=enabled, created_at=now, updated_at=now)
                 session.add(row)
                 session.flush()

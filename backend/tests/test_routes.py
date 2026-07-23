@@ -14,7 +14,7 @@ from app.collectors import GeoFileSnapshot
 from app.db import create_all, create_session_factory, create_sqlite_engine
 from app.main import create_app
 from app.mihomo import ControllerWriteResult, MihomoVersion, ProxyGroup, Traffic
-from app.models import AuditEvent, GatewayTrafficSample, GeoFileMetadata, GeoUpdate, ProbeEvent, RouteEvent, TrafficMonthly
+from app.models import AuditEvent, GatewayTrafficSample, GeoFileMetadata, GeoUpdate, ManagedRulePolicy, ProbeEvent, RouteEvent, TrafficMonthly
 from app.policy_rules import ManagedRuleService
 from app.routes import RuntimeContainer
 from app.probe_targets import ProbeTargetService
@@ -805,6 +805,10 @@ def test_rules_catalogue_contains_current_ai_russian_p2p_and_streaming_categorie
         "/api/rules/policies",
         json={"kind": "GEOSITE", "category": "category-public-tracker", "action": "VPS-FALLBACK", "enabled": True},
     )
+    repeated = client.post(
+        "/api/rules/policies",
+        json={"kind": "GEOSITE", "category": "category-public-tracker", "action": "VPS-FALLBACK", "enabled": True},
+    )
     rejected = client.post(
         "/api/rules/policies",
         json={"kind": "GEOSITE", "category": "category-p2p", "action": "VPS-FALLBACK", "enabled": True},
@@ -819,6 +823,10 @@ def test_rules_catalogue_contains_current_ai_russian_p2p_and_streaming_categorie
         "action": "VPS-FALLBACK",
         "enabled": True,
     }
+    assert repeated.status_code == 201
+    assert repeated.json() == created.json()
+    with factory() as session:
+        assert len(session.scalars(select(ManagedRulePolicy)).all()) == 1
     assert rejected.status_code == 422
     assert rejected.json() == {"detail": "invalid managed rule"}
 
