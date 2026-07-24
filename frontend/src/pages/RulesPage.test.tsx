@@ -173,4 +173,23 @@ describe('RulesPage', () => {
     await waitFor(() => expect(create).toHaveBeenCalled())
     expect(create.mock.calls[0]?.[0]).toEqual({ kind: 'GEOSITE', category: 'category-public-tracker', action: 'VPS-FALLBACK', enabled: true })
   })
+
+  it('marks an active category without losing its selected state', async () => {
+    vi.spyOn(api, 'rules').mockResolvedValue({
+      rules: [],
+      providers: [],
+      direct_text: '',
+      policies: [{ id: 12, kind: 'GEOSITE', category: 'openai', label: 'OpenAI / ChatGPT', action: 'VPS-FALLBACK', enabled: true }],
+      policy_catalog: [{ kind: 'GEOSITE', category: 'openai', label: 'OpenAI / ChatGPT' }],
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    render(<QueryClientProvider client={client}><RulesPage /></QueryClientProvider>)
+
+    const category = await screen.findByRole('button', { name: /OpenAI \/ ChatGPT/ })
+    expect(category).toHaveClass('is-active')
+    expect(category).toHaveClass('selected')
+    expect(category).toHaveAttribute('data-policy-state', 'active')
+    expect(category).toHaveAttribute('aria-pressed', 'true')
+  })
 })

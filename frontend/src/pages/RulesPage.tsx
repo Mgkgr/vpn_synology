@@ -8,6 +8,10 @@ import { AsyncState } from '../components/AsyncState'
 type PolicyKind = 'GEOSITE' | 'GEOIP'
 type PolicyCategory = { kind: PolicyKind, category: string, label: string, description?: string }
 
+function policyKey(kind: PolicyKind, category: string): string {
+  return `${kind}:${category}`
+}
+
 const routeActions: { value: ManagedRuleInput['action'], title: string, description: string }[] = [
   { value: 'VPS-FALLBACK', title: 'Авто VPN', description: 'WG-IMP → HY2-NL' },
   { value: 'WG-IMP', title: 'Только WG-IMP', description: 'основной выход' },
@@ -54,6 +58,11 @@ function RouteActions() {
   return <>{routeActions.map((item) => <option value={item.value} key={item.value}>{item.title} — {item.description}</option>)}</>
 }
 
+function activePolicyCaption(policy: ManagedRulePolicy): string {
+  const action = routeActions.find((item) => item.value === policy.action)
+  return `Уже активно: ${action?.title ?? policy.action}`
+}
+
 function RouteActionPicker({ value, onChange }: { value: ManagedRuleInput['action'], onChange: (value: ManagedRuleInput['action']) => void }) {
   return <div className="policy-route-options" aria-label="Маршрут для нового правила">
     {routeActions.map((item) => <button className={`policy-route-option ${value === item.value ? 'selected' : ''}`} type="button" key={item.value} aria-pressed={value === item.value} onClick={() => onChange(item.value)}><strong>{item.title}</strong><small>{item.description}</small></button>)}
@@ -63,6 +72,9 @@ function RouteActionPicker({ value, onChange }: { value: ManagedRuleInput['actio
 function CategoryPicker({ catalog, kind, category, onPick }: { catalog: PolicyCategory[], kind: PolicyKind, category: string, onPick: (item: PolicyCategory) => void }) {
   const geosite = catalog.filter((item) => item.kind === 'GEOSITE')
   const geoip = catalog.filter((item) => item.kind === 'GEOIP')
+  // Same query key as RulesPage: React Query shares the request and cached data.
+  const activePoliciesResponse = useQuery({ queryKey: ['rules'], queryFn: api.rules })
+  const activePolicies = new Map((activePoliciesResponse.data?.policies ?? []).filter((item) => item.enabled).map((item) => [policyKey(item.kind, item.category), item]))
   const inGroup = (categories: Set<string>) => geosite.filter((item) => categories.has(item.category))
   const russian = inGroup(russianGeoSiteCategories)
   const p2p = inGroup(p2pGeoSiteCategories)
@@ -70,7 +82,11 @@ function CategoryPicker({ catalog, kind, category, onPick }: { catalog: PolicyCa
   const games = inGroup(gamesGeoSiteCategories)
   const special = inGroup(specialGeoSiteCategories)
   const popular = geosite.filter((item) => !groupedGeoSiteCategories.has(item.category))
-  const group = (title: string, description: string, items: PolicyCategory[]) => <div className="policy-category-group"><div><h3>{title}</h3><p>{description}</p></div><div className="policy-category-options">{items.map((item) => <button type="button" className={`policy-category-option ${kind === item.kind && category === item.category ? 'selected' : ''}`} key={`${item.kind}-${item.category}`} aria-pressed={kind === item.kind && category === item.category} onClick={() => onPick(item)}><strong>{item.label}</strong><small>{item.description || (item.kind === 'GEOSITE' ? 'доменная категория' : 'сеть или страна')}</small></button>)}</div></div>
+  const group = (title: string, description: string, items: PolicyCategory[]) => <div className="policy-category-group"><div><h3>{title}</h3><p>{description}</p></div><div className="policy-category-options">{items.map((item) => {
+    const activePolicy = activePolicies.get(policyKey(item.kind, item.category))
+    const selected = kind === item.kind && category === item.category
+    return <button type="button" className={`policy-category-option${activePolicy ? ' is-active' : ''}${selected ? ' selected' : ''}`} key={`${item.kind}-${item.category}`} aria-pressed={selected} data-policy-state={activePolicy ? 'active' : undefined} onClick={() => onPick(item)}><strong>{item.label}</strong><small>{item.description || (item.kind === 'GEOSITE' ? 'доменная категория' : 'сеть или страна')}</small>{activePolicy && <small className="policy-active-badge">{activePolicyCaption(activePolicy)}</small>}</button>
+  })}</div></div>
   return <div className="policy-category-groups">
     {russian.length > 0 && group('Российские сервисы', 'Банки, маркетплейсы, госуслуги и инфраструктура. Широкое правило направит весь набор российских доменов, поэтому для банков и магазинов лучше выбрать точную категорию.', russian)}
     {p2p.length > 0 && group('P2P / торренты', 'Только домены трекеров. Это не анализ и не перехват всего BitTorrent-трафика.', p2p)}
