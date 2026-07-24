@@ -8,10 +8,15 @@ GATEWAY_DIR=${GATEWAY_DIR:-/volume1/docker/vpn-gateway}
 CONFIG=${CONFIG:-$GATEWAY_DIR/mihomo/config.yaml}
 RULES_DIR=${RULES_DIR:-$GATEWAY_DIR/mihomo/rules}
 DASHBOARD_CONTAINER=${DASHBOARD_CONTAINER:-vpn-dashboard}
+WATCH_SECONDS=${1:-0}
 
 [ "$(id -u)" = 0 ] || { echo 'must run as root' >&2; exit 1; }
 [ -x "$DOCKER_BIN" ] || { echo "Docker binary is unavailable: $DOCKER_BIN" >&2; exit 1; }
 [ -f "$CONFIG" ] || { echo "Mihomo config is missing: $CONFIG" >&2; exit 1; }
+case "$WATCH_SECONDS" in
+  ''|*[!0-9]*) echo 'watch duration must be an integer number of seconds' >&2; exit 1 ;;
+esac
+[ "$WATCH_SECONDS" -le 60 ] || { echo 'watch duration must not exceed 60 seconds' >&2; exit 1; }
 
 echo 'RESULT=success'
 echo 'KINOPOISK_DIAGNOSTIC=read_only'
@@ -81,9 +86,10 @@ fi
 echo 'MIHOMO_CONFIG_TEST=end'
 
 echo 'LIVE_CONNECTIONS=begin'
-"$DOCKER_BIN" exec -i "$DASHBOARD_CONTAINER" python - <<'PY'
+"$DOCKER_BIN" exec -e "KINOPOISK_WATCH_SECONDS=$WATCH_SECONDS" -i "$DASHBOARD_CONTAINER" python - <<'PY'
 import json
 import os
+import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -95,27 +101,64 @@ if secret_file:
     secret = Path(secret_file).read_text(encoding="utf-8").strip()
     if secret:
         headers["Authorization"] = f"Bearer {secret}"
-try:
+
+
+def connections():
     request = Request(url, headers=headers, method="GET")
     with urlopen(request, timeout=5) as response:
         payload = json.load(response)
+    items = payload.get("connections", [])
+    return items if isinstance(items, list) else []
+
+
+def describe(item):
+    metadata = item.get("metadata") if isinstance(item, dict) else None
+    metadata = metadata if isinstance(metadata, dict) else {}
+    source = str(metadata.get("sourceIP", "")).strip()[:64] or "unknown"
+    host = str(metadata.get("host", "")).strip().lower()[:253] or "unknown"
+    rule = str(item.get("rule", "unknown"))[:160]
+    chains = item.get("chains", item.get("chain", []))
+    if not isinstance(chains, list):
+        chains = []
+    chain = ",".join(str(value)[:80] for value in chains)[:253]
+    return source, host, rule, chain
+
+
+try:
+    initial = connections()
 except (OSError, HTTPError, URLError, ValueError) as error:
     print(f"LIVE_CONNECTIONS_ERROR={type(error).__name__}")
 else:
     matches = []
-    for item in payload.get("connections", []):
-        metadata = item.get("metadata") if isinstance(item, dict) else None
-        metadata = metadata if isinstance(metadata, dict) else {}
-        host = str(metadata.get("host", "")).strip().lower()
+    for item in initial:
+        _source, host, rule, chain = describe(item)
         if any(marker in host for marker in ("kinopoisk", "yandex", "yastatic", "yccdn", "clstorage")):
-            rule = str(item.get("rule", "unknown"))[:160]
-            chains = item.get("chains", item.get("chain", []))
-            if not isinstance(chains, list):
-                chains = []
-            chain = ",".join(str(value)[:80] for value in chains)
-            matches.append((host[:253], rule, chain[:253]))
+            matches.append((host, rule, chain))
     print(f"LIVE_CONNECTIONS_MATCHED={len(matches)}")
     for index, (host, rule, chain) in enumerate(matches, start=1):
         print(f"LIVE_{index}=HOST={host}|RULE={rule}|CHAIN={chain}")
+
+    watch_seconds = int(os.environ.get("KINOPOISK_WATCH_SECONDS", "0"))
+    if watch_seconds:
+        baseline = {str(item.get("id", "")) for item in initial if isinstance(item, dict)}
+        observed = set()
+        print(f"KINOPOISK_WATCH_READY=open or retry the TV app now; seconds={watch_seconds}")
+        deadline = time.monotonic() + watch_seconds
+        while time.monotonic() < deadline and len(observed) < 80:
+            time.sleep(1)
+            try:
+                current = connections()
+            except (OSError, HTTPError, URLError, ValueError):
+                continue
+            for item in current:
+                if not isinstance(item, dict) or str(item.get("id", "")) in baseline:
+                    continue
+                source, host, rule, chain = describe(item)
+                key = (source, host, rule, chain)
+                if key in observed:
+                    continue
+                observed.add(key)
+                print(f"TV_WATCH_{len(observed)}=SOURCE={source}|HOST={host}|RULE={rule}|CHAIN={chain}")
+        print(f"TV_WATCH_NEW_CONNECTIONS={len(observed)}")
 PY
 echo 'LIVE_CONNECTIONS=end'

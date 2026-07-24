@@ -2,7 +2,9 @@
 param(
   [string]$HostName = 'roaring.crazedns.ru',
   [int]$Port = 5004,
-  [string]$UserName = 'prometei'
+  [string]$UserName = 'prometei',
+  [ValidateRange(0, 60)]
+  [int]$WatchSeconds = 0
 )
 
 Set-StrictMode -Version Latest
@@ -20,7 +22,7 @@ if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
 & scp.exe -O -P $Port $source $target
 if ($LASTEXITCODE -ne 0) { throw 'Kinopoisk diagnostic upload failed.' }
 
-$remoteCommand = "chmod 700 '$remote'; sudo /bin/sh '$remote'; status=`$?; rm -f '$remote'; exit `$status"
+$remoteCommand = "chmod 700 '$remote'; sudo /bin/sh '$remote' '$WatchSeconds'; status=`$?; rm -f '$remote'; exit `$status"
 & ssh.exe -tt -p $Port "$UserName@$HostName" $remoteCommand
 if ($LASTEXITCODE -ne 0) { throw 'Kinopoisk routing diagnostic failed.' }
 
