@@ -9,6 +9,7 @@ CONFIG=${CONFIG:-$GATEWAY_DIR/mihomo/config.yaml}
 RULES_DIR=${RULES_DIR:-$GATEWAY_DIR/mihomo/rules}
 DASHBOARD_CONTAINER=${DASHBOARD_CONTAINER:-vpn-dashboard}
 WATCH_SECONDS=${1:-0}
+SOURCE_ADDRESS=${2:-}
 
 [ "$(id -u)" = 0 ] || { echo 'must run as root' >&2; exit 1; }
 [ -x "$DOCKER_BIN" ] || { echo "Docker binary is unavailable: $DOCKER_BIN" >&2; exit 1; }
@@ -17,6 +18,9 @@ case "$WATCH_SECONDS" in
   ''|*[!0-9]*) echo 'watch duration must be an integer number of seconds' >&2; exit 1 ;;
 esac
 [ "$WATCH_SECONDS" -le 60 ] || { echo 'watch duration must not exceed 60 seconds' >&2; exit 1; }
+case "$SOURCE_ADDRESS" in
+  ''|*[!0-9.]*|.*|*.) echo 'source address must be an IPv4 address when set' >&2; exit 1 ;;
+esac
 
 echo 'RESULT=success'
 echo 'KINOPOISK_DIAGNOSTIC=read_only'
@@ -86,7 +90,7 @@ fi
 echo 'MIHOMO_CONFIG_TEST=end'
 
 echo 'LIVE_CONNECTIONS=begin'
-"$DOCKER_BIN" exec -e "KINOPOISK_WATCH_SECONDS=$WATCH_SECONDS" -i "$DASHBOARD_CONTAINER" python - <<'PY'
+"$DOCKER_BIN" exec -e "KINOPOISK_WATCH_SECONDS=$WATCH_SECONDS" -e "KINOPOISK_SOURCE_ADDRESS=$SOURCE_ADDRESS" -i "$DASHBOARD_CONTAINER" python - <<'PY'
 import json
 import os
 import time
@@ -116,12 +120,15 @@ def describe(item):
     metadata = metadata if isinstance(metadata, dict) else {}
     source = str(metadata.get("sourceIP", "")).strip()[:64] or "unknown"
     host = str(metadata.get("host", "")).strip().lower()[:253] or "unknown"
+    destination = str(metadata.get("destinationIP", "")).strip()[:64] or "unknown"
+    port = str(metadata.get("destinationPort", "")).strip()[:16] or "unknown"
+    network = str(metadata.get("network", "")).strip().lower()[:16] or "unknown"
     rule = str(item.get("rule", "unknown"))[:160]
     chains = item.get("chains", item.get("chain", []))
     if not isinstance(chains, list):
         chains = []
     chain = ",".join(str(value)[:80] for value in chains)[:253]
-    return source, host, rule, chain
+    return source, host, destination, port, network, rule, chain
 
 
 try:
@@ -129,14 +136,17 @@ try:
 except (OSError, HTTPError, URLError, ValueError) as error:
     print(f"LIVE_CONNECTIONS_ERROR={type(error).__name__}")
 else:
+    source_filter = os.environ.get("KINOPOISK_SOURCE_ADDRESS", "").strip()
     matches = []
     for item in initial:
-        _source, host, rule, chain = describe(item)
+        source, host, _destination, _port, _network, rule, chain = describe(item)
+        if source_filter and source != source_filter:
+            continue
         if any(marker in host for marker in ("kinopoisk", "yandex", "yastatic", "yccdn", "clstorage")):
-            matches.append((host, rule, chain))
+            matches.append((source, host, rule, chain))
     print(f"LIVE_CONNECTIONS_MATCHED={len(matches)}")
-    for index, (host, rule, chain) in enumerate(matches, start=1):
-        print(f"LIVE_{index}=HOST={host}|RULE={rule}|CHAIN={chain}")
+    for index, (source, host, rule, chain) in enumerate(matches, start=1):
+        print(f"LIVE_{index}=SOURCE={source}|HOST={host}|RULE={rule}|CHAIN={chain}")
 
     watch_seconds = int(os.environ.get("KINOPOISK_WATCH_SECONDS", "0"))
     if watch_seconds:
@@ -153,12 +163,14 @@ else:
             for item in current:
                 if not isinstance(item, dict) or str(item.get("id", "")) in baseline:
                     continue
-                source, host, rule, chain = describe(item)
-                key = (source, host, rule, chain)
+                source, host, destination, port, network, rule, chain = describe(item)
+                if source_filter and source != source_filter:
+                    continue
+                key = (source, host, destination, port, network, rule, chain)
                 if key in observed:
                     continue
                 observed.add(key)
-                print(f"TV_WATCH_{len(observed)}=SOURCE={source}|HOST={host}|RULE={rule}|CHAIN={chain}")
+                print(f"TV_WATCH_{len(observed)}=SOURCE={source}|HOST={host}|DESTINATION={destination}:{port}|NETWORK={network}|RULE={rule}|CHAIN={chain}")
         print(f"TV_WATCH_NEW_CONNECTIONS={len(observed)}")
 PY
 echo 'LIVE_CONNECTIONS=end'

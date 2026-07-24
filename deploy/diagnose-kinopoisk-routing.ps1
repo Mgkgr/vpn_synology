@@ -4,11 +4,16 @@ param(
   [int]$Port = 5004,
   [string]$UserName = 'prometei',
   [ValidateRange(0, 60)]
-  [int]$WatchSeconds = 0
+  [int]$WatchSeconds = 0,
+  [string]$SourceAddress = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ($SourceAddress -and $SourceAddress -notmatch '^(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$') {
+  throw 'SourceAddress must be an IPv4 address, for example 10.66.0.5.'
+}
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $source = Join-Path $projectRoot 'deploy\scripts\diagnose-kinopoisk-routing.sh'
@@ -22,7 +27,7 @@ if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
 & scp.exe -O -P $Port $source $target
 if ($LASTEXITCODE -ne 0) { throw 'Kinopoisk diagnostic upload failed.' }
 
-$remoteCommand = "chmod 700 '$remote'; sudo /bin/sh '$remote' '$WatchSeconds'; status=`$?; rm -f '$remote'; exit `$status"
+$remoteCommand = "chmod 700 '$remote'; sudo /bin/sh '$remote' '$WatchSeconds' '$SourceAddress'; status=`$?; rm -f '$remote'; exit `$status"
 & ssh.exe -tt -p $Port "$UserName@$HostName" $remoteCommand
 if ($LASTEXITCODE -ne 0) { throw 'Kinopoisk routing diagnostic failed.' }
 
