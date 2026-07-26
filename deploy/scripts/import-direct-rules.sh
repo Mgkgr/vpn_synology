@@ -45,7 +45,7 @@ tar -C "$GATEWAY_DIR" -cf - mihomo/rules/direct.txt | \
   openssl enc -aes-256-cbc -pbkdf2 -salt -pass "file:$SECRET_FILE" -out "$archive"
 chmod 0600 "$archive"
 
-"$DOCKER_BIN" cp "$normalized" "${DASHBOARD_CONTAINER}:$container_input"
+"$DOCKER_BIN" exec -i "$DASHBOARD_CONTAINER" sh -c 'container_input=/tmp/direct-import.txt; umask 077; cat > "$container_input"' < "$normalized"
 "$DOCKER_BIN" exec -i -e "DIRECT_IMPORT_ACTOR=$ACTOR" "$DASHBOARD_CONTAINER" python - <<'PY'
 import asyncio
 import os
