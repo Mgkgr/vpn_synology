@@ -29,14 +29,18 @@ command -v openssl >/dev/null 2>&1 || { echo 'openssl is unavailable' >&2; exit 
 
 umask 077
 normalized=$(mktemp /tmp/vpn-dashboard-direct-import.XXXXXX)
+legacy_current=$(mktemp /tmp/vpn-dashboard-direct-current.XXXXXX)
 container_input=/tmp/direct-import.txt
+container_current=/tmp/direct-current.txt
 cleanup() {
   rm -f "$normalized"
-  "$DOCKER_BIN" exec "$DASHBOARD_CONTAINER" rm -f "$container_input" >/dev/null 2>&1 || true
+  rm -f "$legacy_current"
+  "$DOCKER_BIN" exec "$DASHBOARD_CONTAINER" rm -f "$container_input" "$container_current" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
 /usr/bin/python3 "$NORMALIZER" "$SOURCE" "$normalized"
+/usr/bin/python3 "$NORMALIZER" "$DIRECT_FILE" "$legacy_current" >/dev/null
 
 mkdir -p "$BACKUP_DIR"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
@@ -46,6 +50,7 @@ tar -C "$GATEWAY_DIR" -cf - mihomo/rules/direct.txt | \
 chmod 0600 "$archive"
 
 "$DOCKER_BIN" exec -i "$DASHBOARD_CONTAINER" sh -c 'container_input=/tmp/direct-import.txt; umask 077; cat > "$container_input"' < "$normalized"
+"$DOCKER_BIN" exec -i "$DASHBOARD_CONTAINER" sh -c 'container_current=/tmp/direct-current.txt; umask 077; cat > "$container_current"' < "$legacy_current"
 "$DOCKER_BIN" exec -i -e "DIRECT_IMPORT_ACTOR=$ACTOR" "$DASHBOARD_CONTAINER" python - <<'PY'
 import asyncio
 import os
@@ -61,7 +66,7 @@ try:
     if service is None:
         raise RuntimeError("DIRECT rule service is unavailable")
 
-    current = service.preview_direct_rules(service.read_direct_rules())
+    current = service.preview_direct_rules(Path("/tmp/direct-current.txt").read_text(encoding="utf-8"))
     imported = service.preview_direct_rules(Path("/tmp/direct-import.txt").read_text(encoding="utf-8"))
     present = set(current.rules)
     additions = [rule for rule in imported.rules if rule not in present]
