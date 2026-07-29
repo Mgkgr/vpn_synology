@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -7,9 +7,47 @@ import { OverviewPage } from './OverviewPage'
 
 vi.mock('../components/TrafficChart', () => ({ TrafficChart: () => null }))
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
 
 describe('OverviewPage', () => {
+  it('shows only clients with a recent WireGuard handshake in the active list', async () => {
+    const now = Date.now()
+    vi.spyOn(api, 'overview').mockResolvedValue({
+      client_count: 3,
+      clients: [
+        { id: 1, name: 'online-client', enabled: true, ipv4_address: '10.66.0.2', latest_handshake_at: new Date(now - 3 * 60_000).toISOString(), received_bytes: 10, transmitted_bytes: 20 },
+        { id: 2, name: 'stale-client', enabled: true, ipv4_address: '10.66.0.3', latest_handshake_at: new Date(now - 6 * 60_000).toISOString(), received_bytes: 10, transmitted_bytes: 20 },
+        { id: 3, name: 'never-connected', enabled: true, ipv4_address: '10.66.0.4', latest_handshake_at: null, received_bytes: 0, transmitted_bytes: 0 },
+      ],
+      mihomo_version: null,
+      traffic: null,
+      services: [],
+      fallback: { primary: 'WG-IMP', reserve: 'HY2-NL', selected: 'WG-IMP' },
+    })
+    vi.spyOn(api, 'realtimeTraffic').mockResolvedValue({ period: '30m', sample_interval_seconds: 60, points: [] })
+    vi.spyOn(api, 'updates').mockResolvedValue({ updates: [] })
+    vi.spyOn(api, 'journal').mockResolvedValue({ events: [], page: 1, page_size: 50, has_more: false })
+    vi.spyOn(api, 'hostHealth').mockResolvedValue({
+      observed_at: new Date(now).toISOString(), cpu_usage_percent: null, load_one: 0, load_five: 0, load_fifteen: 0,
+      memory_total_bytes: 0, memory_available_bytes: 0, swap_total_bytes: 0, swap_free_bytes: 0,
+      volume_total_bytes: 0, volume_available_bytes: 0, network_rx_errors: 0, network_rx_dropped: 0,
+      network_tx_errors: 0, network_tx_dropped: 0, containers: [],
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    render(<QueryClientProvider client={client}><OverviewPage /></QueryClientProvider>)
+
+    expect(await screen.findByText('online-client')).toBeVisible()
+    expect(screen.getByText('Активно: 1 из 3 · handshake ≤ 5 мин')).toBeVisible()
+    expect(screen.getByText('подключён')).toBeVisible()
+    expect(screen.queryByText('stale-client')).not.toBeInTheDocument()
+    expect(screen.queryByText('never-connected')).not.toBeInTheDocument()
+  })
+
   it('показывает только собранные статусы сервисов и выбранный резерв', async () => {
     vi.spyOn(api, 'overview').mockResolvedValue({
       client_count: 0,

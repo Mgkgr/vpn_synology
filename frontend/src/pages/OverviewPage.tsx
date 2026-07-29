@@ -7,9 +7,26 @@ import { AsyncState } from '../components/AsyncState'
 import { formatBytes, formatDate, formatRate, Status } from '../components/Status'
 import { TrafficChart } from '../components/TrafficChart'
 
+const ACTIVE_HANDSHAKE_WINDOW_MS = 5 * 60_000
+
+type OverviewClient = {
+  id: number
+  name: string
+  ipv4_address: string
+  enabled: boolean
+  latest_handshake_at: string | null
+  received_bytes: number
+  transmitted_bytes: number
+}
+
 export function OverviewPage() {
   const [trafficPeriod, setTrafficPeriod] = useState<RealtimeTrafficPeriod>('30m')
-  const overview = useQuery({ queryKey: ['overview'], queryFn: api.overview })
+  const overview = useQuery({
+    queryKey: ['overview'],
+    queryFn: api.overview,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+  })
   const realtimeTraffic = useQuery({
     queryKey: ['traffic-realtime', trafficPeriod],
     queryFn: () => api.realtimeTraffic(trafficPeriod),
@@ -27,6 +44,7 @@ export function OverviewPage() {
   const data = overview.data
   const traffic = realtimeTraffic.data?.points.at(-1) ?? null
   const selectedExit = data?.fallback.selected ?? null
+  const activeClients = (data?.clients ?? []).filter(isActiveWireGuardClient)
 
   return (
     <main className="page overview-page">
@@ -68,8 +86,8 @@ export function OverviewPage() {
           </section>
         </div>
         <section className="panel" aria-labelledby="clients-title">
-          <div className="section-heading"><h2 id="clients-title">Активные клиенты</h2><span>{data?.clients.length ?? 0} записей</span></div>
-          <ClientTable clients={data?.clients ?? []} />
+          <div className="section-heading"><h2 id="clients-title">Активные клиенты</h2><span>Активно: {activeClients.length} из {data?.client_count ?? 0} · handshake ≤ 5 мин</span></div>
+          <ClientTable clients={activeClients} />
         </section>
         <section className="panel" aria-labelledby="events-title">
           <div className="section-heading"><h2 id="events-title">Последние события</h2><span>аудит панели</span></div>
@@ -90,7 +108,15 @@ function overviewGeoResult(update: { verification: string; changed_files: string
   return update.verification === 'failed' ? 'ошибка, прежние файлы сохранены' : 'снимок файлов сохранён'
 }
 
-function ClientTable({ clients }: { clients: { id: number; name: string; ipv4_address: string; enabled: boolean; latest_handshake_at: string | null; received_bytes: number; transmitted_bytes: number }[] }) {
+function isActiveWireGuardClient(client: OverviewClient): boolean {
+  if (!client.enabled || !client.latest_handshake_at) return false
+  const handshakeAt = Date.parse(client.latest_handshake_at)
+  if (!Number.isFinite(handshakeAt)) return false
+  const ageMs = Date.now() - handshakeAt
+  return ageMs >= -60_000 && ageMs <= ACTIVE_HANDSHAKE_WINDOW_MS
+}
+
+function ClientTable({ clients }: { clients: OverviewClient[] }) {
   if (!clients.length) return <p className="state-message">Активных клиентов пока нет.</p>
-  return <table className="data-table"><thead><tr><th>Клиент</th><th>Адрес</th><th>Handshake</th><th>Трафик</th><th>Состояние</th></tr></thead><tbody>{clients.map((client) => <tr key={client.id}><th scope="row">{client.name}</th><td>{client.ipv4_address}</td><td>{formatDate(client.latest_handshake_at)}</td><td>{formatBytes(client.received_bytes + client.transmitted_bytes)}</td><td><Status ok={client.enabled} /></td></tr>)}</tbody></table>
+  return <table className="data-table"><thead><tr><th>Клиент</th><th>Адрес</th><th>Handshake</th><th>Трафик</th><th>Состояние</th></tr></thead><tbody>{clients.map((client) => <tr key={client.id}><th scope="row">{client.name}</th><td>{client.ipv4_address}</td><td>{formatDate(client.latest_handshake_at)}</td><td>{formatBytes(client.received_bytes + client.transmitted_bytes)}</td><td><span className="status-label healthy"><span className="status-dot healthy" aria-hidden="true" />подключён</span></td></tr>)}</tbody></table>
 }
