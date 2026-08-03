@@ -12,6 +12,7 @@ MIHOMO_CONTAINER=${MIHOMO_CONTAINER:-vpn-mihomo}
 DASHBOARD_CONTAINER=${DASHBOARD_CONTAINER:-vpn-dashboard}
 WATCH_SECONDS=${1:-30}
 SOURCE_ADDRESS=${2:-}
+VALIDATE_ONLY=${VALIDATE_ONLY:-0}
 LAN_CIDR=192.168.3.0/24
 LAN_PROBE=192.168.3.1
 
@@ -21,7 +22,16 @@ LAN_PROBE=192.168.3.1
 [ -f "$DIRECT_RULES" ] || { echo "DIRECT rules are missing: $DIRECT_RULES" >&2; exit 1; }
 case "$WATCH_SECONDS" in ''|*[!0-9]*) echo 'watch duration must be an integer number of seconds' >&2; exit 1 ;; esac
 [ "$WATCH_SECONDS" -le 60 ] || { echo 'watch duration must not exceed 60 seconds' >&2; exit 1; }
-case "$SOURCE_ADDRESS" in ''|*[!0-9.]*|.*|*.) echo 'source address must be an IPv4 address when set' >&2; exit 1 ;; esac
+case "$SOURCE_ADDRESS" in
+  '') ;;
+  *[!0-9.]*|.*|*.) echo 'source address must be an IPv4 address when set' >&2; exit 1 ;;
+esac
+case "$VALIDATE_ONLY" in 0|1) ;; *) echo 'VALIDATE_ONLY must be 0 or 1' >&2; exit 1 ;; esac
+
+if [ "$VALIDATE_ONLY" = 1 ]; then
+  echo 'VALIDATION=ok'
+  exit 0
+fi
 
 for container in "$WIREGUARD_CONTAINER" "$MIHOMO_CONTAINER" "$DASHBOARD_CONTAINER"; do
   "$DOCKER_BIN" inspect "$container" >/dev/null 2>&1 || { echo "required container is missing: $container" >&2; exit 1; }
