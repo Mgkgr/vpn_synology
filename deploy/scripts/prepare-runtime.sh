@@ -83,6 +83,8 @@ fi
 [ -d "$MIHOMO_RULES_DIR" ] || { echo 'Mihomo rules directory is missing' >&2; exit 1; }
 [ -r "$(dirname "$MIHOMO_RULES_DIR")/GeoIP.dat" ] || { echo 'Mihomo GeoIP.dat is missing' >&2; exit 1; }
 [ -r "$(dirname "$MIHOMO_RULES_DIR")/GeoSite.dat" ] || { echo 'Mihomo GeoSite.dat is missing' >&2; exit 1; }
+MIHOMO_DIR=$(dirname "$MIHOMO_RULES_DIR")
+DASHBOARD_UID="$APP_UID" MIHOMO_DIR="$MIHOMO_DIR" /bin/sh "$PROJECT_DIR/deploy/scripts/ensure-geodata-read-access.sh"
 chown -R "$APP_UID:$APP_GID" "$MIHOMO_RULES_DIR"
 find "$MIHOMO_RULES_DIR" -type d -exec chmod 0770 {} \;
 find "$MIHOMO_RULES_DIR" -type f -exec chmod 0660 {} \;
