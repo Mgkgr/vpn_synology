@@ -51,6 +51,16 @@ docker compose up -d --build dashboard
 
 Для Synology проект развёрнут в `/volume1/docker/vpn-dashboard`. Сборка меняет только контейнер `vpn-dashboard`; существующие VPN-контейнеры не затрагиваются.
 
+## Healthcheck VPN-контейнеров
+
+Источник конфигурации шлюза хранится в `deploy/gateway/compose.yaml`. Скрипт ниже добавляет healthcheck без изменения WireGuard, его клиентов или ключей:
+
+```powershell
+D:\Projects\vpn-gateway-dashboard\deploy\apply-gateway-healthchecks.ps1
+```
+
+Перед заменой Compose-файла он сверяет хеш текущей конфигурации NAS, проверяет живой контроллер Mihomo и HTTP-ответ MetaCubeXD, сохраняет резервную копию и при неудаче возвращает прежний Compose. На время применения перезапускаются только `vpn-mihomo` и `vpn-metacubexd`; WireGuard продолжает работать. После этого DSM покажет `healthy` или `unhealthy` у обоих контейнеров. Проверка Mihomo контролирует процесс и локальный TCP-порт API `9091`, а MetaCubeXD — реальный ответ на HTTP-запрос к собственной странице.
+
 ## Безопасность
 
 - Не добавляйте в Git `deploy/dashboard.env`, базу SQLite, архивы конфигураций или WireGuard-профили.

@@ -1,0 +1,79 @@
+name: vpn-gateway
+
+services:
+  wireguard:
+    image: ghcr.io/wg-easy/wg-easy@sha256:cf815209439101842f81d62bb25f7d66140e4cf8c100b4de5d0e84569d38732a
+    container_name: vpn-wireguard
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      INSECURE: "true"
+      DISABLE_IPV6: "true"
+      PORT: "51821"
+    volumes:
+      - ./wireguard/data:/etc/wireguard
+    ports:
+      - "51820:51820/udp"
+      - "192.168.2.103:51821:51821/tcp"
+      - "192.168.2.103:9091:9091/tcp"
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      net.ipv4.conf.all.src_valid_mark: "1"
+    restart: unless-stopped
+
+  mihomo:
+    image: metacubex/mihomo@sha256:e6acd921addecfd59a8e2d38203f88356d635b54de6c0673db0e015139989312
+    container_name: vpn-mihomo
+    network_mode: "service:wireguard"
+    depends_on:
+      wireguard:
+        condition: service_started
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ./mihomo:/root/.config/mihomo
+    command: ["-d", "/root/.config/mihomo"]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test -s /proc/1/cmdline &&
+          grep -Eq '^[[:space:]]*[0-9]+: [0-9A-F]{8,32}:2393 ' /proc/net/tcp /proc/net/tcp6 2>/dev/null
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  metacubexd:
+    image: ghcr.io/metacubex/metacubexd@sha256:ec27292e8d26dd561221c3ddf8d1fc7bab5452861362bd945a3b83555c295676
+    container_name: vpn-metacubexd
+    environment:
+      DEFAULT_BACKEND_URL: http://192.168.2.103:9091
+    ports:
+      - "192.168.2.103:9090:80/tcp"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          const http=require('http');const request=http.get({host:'127.0.0.1',port:80,path:'/',timeout:3000},response=>{response.resume();process.exit(response.statusCode>=200&&response.statusCode<400?0:1)});request.on('timeout',()=>request.destroy(new Error('timeout')));request.on('error',()=>process.exit(1));
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  uptime-kuma:
+    image: louislam/uptime-kuma@sha256:9aeb4e51d038047f414309c77a1af553281ca535723cb88907d907269d0a908e
+    container_name: vpn-uptime-kuma
+    volumes:
+      - ./uptime-kuma:/app/data
+    ports:
+      - "192.168.2.103:3001:3001/tcp"
+    restart: unless-stopped
