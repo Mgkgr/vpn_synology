@@ -31,10 +31,17 @@ snapshot() {
     NR == 1 { next }
     NF < 7 { next }
     $5 ~ /^[0-9]+$/ && $6 ~ /^[0-9]+$/ && $7 ~ /^[0-9]+$/ {
-      count += 1
+      allowed = $4
+      split(allowed, allowed_parts, ",")
+      client = allowed_parts[1]
+      sub(/\/32$/, "", client)
+      if (client !~ /^10\.66\.[0-9]+\.[0-9]+$/) {
+        count += 1
+        client = "unknown-" count
+      }
       endpoint = ($3 == "" || $3 == "(none)") ? "none" : "seen"
       handshake = $5 == 0 ? "never" : (now >= $5 ? now - $5 : 0)
-      printf "%d|%s|%s|%s|%s\n", count, handshake, endpoint, $6, $7
+      printf "%s|%s|%s|%s|%s\n", client, handshake, endpoint, $6, $7
     }
     END { if (count == 0) exit 0 }
   ' > "$output"
@@ -48,8 +55,8 @@ print_snapshot() {
   fi
   count=$(wc -l < "$file" | tr -d ' ')
   echo "PEERS_TOTAL=$count"
-  while IFS='|' read -r number handshake endpoint server_rx server_tx; do
-    echo "PEER_$number=HANDSHAKE_AGE_SECONDS=$handshake|ENDPOINT=$endpoint|SERVER_RX_BYTES=$server_rx|SERVER_TX_BYTES=$server_tx"
+  while IFS='|' read -r address handshake endpoint server_rx server_tx; do
+    echo "PEER_$address=HANDSHAKE_AGE_SECONDS=$handshake|ENDPOINT=$endpoint|SERVER_RX_BYTES=$server_rx|SERVER_TX_BYTES=$server_tx"
   done < "$file"
 }
 

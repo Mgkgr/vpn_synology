@@ -34,7 +34,11 @@ if [ "$1" = exec ]; then
     printf 'server-private\tserver-public\t51820\t0\n'
     if [ "$count" = 0 ]; then
       printf 'peer-public\tpsk\t198.51.100.1:62000\t10.66.0.4/32\t1000\t100\t200\t25\n'
+      printf 'peer-public-2\tpsk\t198.51.100.2:62000\t10.66.0.5/32\t1000\t500\t700\t25\n'
     else
+      # wg-easy can reorder peers between reads; the same address must retain
+      # its identity for counter deltas.
+      printf 'peer-public-2\tpsk\t198.51.100.2:62000\t10.66.0.5/32\t1010\t800\t900\t25\n'
       printf 'peer-public\tpsk\t198.51.100.1:62000\t10.66.0.4/32\t1010\t300\t500\t25\n'
     fi
     exit 0
@@ -56,7 +60,8 @@ output=$(PATH="$TMP:$PATH" \
 
 printf '%s\n' "$output" | grep -Fqx 'RESULT=success'
 printf '%s\n' "$output" | grep -Fqx 'UDP_51820=published'
-printf '%s\n' "$output" | grep -Fqx 'PEERS_TOTAL=1'
-printf '%s\n' "$output" | grep -Fqx 'PEER_1=HANDSHAKE_AGE_SECONDS=20|ENDPOINT=seen|SERVER_RX_BYTES=100|SERVER_TX_BYTES=200'
-printf '%s\n' "$output" | grep -Fqx 'PEER_1_DELTA=HANDSHAKE_CHANGED=yes|SERVER_RX_DELTA=200|SERVER_TX_DELTA=300'
+printf '%s\n' "$output" | grep -Fqx 'PEERS_TOTAL=2'
+printf '%s\n' "$output" | grep -Fqx 'PEER_10.66.0.4=HANDSHAKE_AGE_SECONDS=20|ENDPOINT=seen|SERVER_RX_BYTES=100|SERVER_TX_BYTES=200'
+printf '%s\n' "$output" | grep -Fqx 'PEER_10.66.0.4_DELTA=HANDSHAKE_CHANGED=yes|SERVER_RX_DELTA=200|SERVER_TX_DELTA=300'
+printf '%s\n' "$output" | grep -Fqx 'PEER_10.66.0.5_DELTA=HANDSHAKE_CHANGED=yes|SERVER_RX_DELTA=300|SERVER_TX_DELTA=200'
 printf '%s\n' 'PASS test-diagnose-wireguard-transport'
