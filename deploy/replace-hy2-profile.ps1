@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [string]$HostName = 'roaring.crazedns.ru',
   [int]$Port = 5004,
