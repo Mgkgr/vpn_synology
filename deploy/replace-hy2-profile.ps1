@@ -3,9 +3,9 @@ param(
   [string]$HostName = 'roaring.crazedns.ru',
   [int]$Port = 5004,
   [string]$UserName = 'prometei',
-  [string]$Server = 'dev.failusha.digital',
-  [int]$ServerPort = 443,
-  [string]$PortRange = '20000-50000',
+  [switch]$ImportClipboard,
+  [switch]$PrepareProfileOnly,
+  [string]$ProfileStorePath = (Join-Path $env:LOCALAPPDATA 'vpn-gateway\hy2-usa-profile.clixml'),
   [ValidateRange(30, 180)]
   [int]$CompletionTimeoutSeconds = 120
 )
@@ -30,16 +30,98 @@ function ConvertTo-PosixAssignment([string]$Name, [string]$Value) {
   return "$Name='$Value'"
 }
 
-if ($Server -notmatch '^[A-Za-z0-9.-]+$') { throw 'Server contains unsupported characters.' }
-if ($ServerPort -lt 1 -or $ServerPort -gt 65535) { throw 'ServerPort must be between 1 and 65535.' }
-if ($PortRange -notmatch '^\d{1,5}-\d{1,5}$') { throw 'PortRange must use the form first-last.' }
-$rangeParts = $PortRange -split '-'
-if ([int]$rangeParts[0] -lt 1 -or [int]$rangeParts[1] -gt 65535 -or [int]$rangeParts[0] -gt [int]$rangeParts[1]) {
-  throw 'PortRange must be a valid ascending UDP port range.'
+function Get-UriQueryValue([string]$Query, [string]$Name) {
+  foreach ($part in $Query.TrimStart('?').Split('&')) {
+    if (-not $part) { continue }
+    $pair = $part.Split('=', 2)
+    if ([Uri]::UnescapeDataString($pair[0]) -ne $Name) { continue }
+    if ($pair.Count -lt 2) { return '' }
+    return [Uri]::UnescapeDataString($pair[1])
+  }
+  return $null
 }
 
-$passwordSecure = Read-Host -AsSecureString -Prompt 'Пароль Hysteria2'
-$obfsPasswordSecure = Read-Host -AsSecureString -Prompt 'Пароль obfs Salamander'
+function Get-Hy2ProfileFromClipboard {
+  $clipboard = Get-Clipboard -Raw -ErrorAction Stop
+  $match = [regex]::Match([string]$clipboard, '(?i)hy2://[^\s]+')
+  if (-not $match.Success) { throw 'Clipboard does not contain a Hysteria2 URI.' }
+  $candidate = [System.Net.WebUtility]::HtmlDecode($match.Value).Trim() -replace '\\@', '@'
+  try { $uri = [Uri]$candidate } catch { throw 'Clipboard Hysteria2 URI is invalid.' }
+  if ($uri.Scheme -ne 'hy2' -or -not $uri.Host -or -not $uri.UserInfo -or $uri.Port -lt 1) {
+    throw 'Clipboard Hysteria2 URI is incomplete.'
+  }
+  $obfs = Get-UriQueryValue $uri.Query 'obfs-password'
+  $sni = Get-UriQueryValue $uri.Query 'sni'
+  $portRange = (Get-UriQueryValue $uri.Query 'mport') -replace ':', '-'
+  if ((Get-UriQueryValue $uri.Query 'obfs') -ne 'salamander' -or -not $obfs -or -not $portRange) {
+    throw 'Clipboard Hysteria2 URI is missing Salamander or port-hopping settings.'
+  }
+  [pscustomobject]@{
+    Version = 1
+    Server = $uri.Host
+    ServerPort = $uri.Port
+    PortRange = $portRange
+    Sni = if ($sni) { $sni } else { $uri.Host }
+    Password = ConvertTo-SecureString ([Uri]::UnescapeDataString($uri.UserInfo)) -AsPlainText -Force
+    ObfsPassword = ConvertTo-SecureString $obfs -AsPlainText -Force
+  }
+}
+
+function Set-ProfileStoreAcl([string]$Path) {
+  $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+  $acl = New-Object Security.AccessControl.FileSecurity
+  $acl.SetOwner($sid)
+  $acl.SetAccessRuleProtection($true, $false)
+  $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow)))
+  [IO.File]::SetAccessControl($Path, $acl)
+}
+
+function Save-Hy2Profile([object]$Profile, [string]$Path) {
+  $directory = Split-Path -Parent $Path
+  if ([string]::IsNullOrWhiteSpace($directory)) { throw 'Profile store path must include a directory.' }
+  New-Item -ItemType Directory -Force -Path $directory | Out-Null
+  Export-Clixml -LiteralPath $Path -InputObject $Profile -Force
+  Set-ProfileStoreAcl $Path
+}
+
+function Read-Hy2Profile([string]$Path) {
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    throw 'Encrypted Hysteria2 profile is absent. Copy the supplied hy2 URI and run this command once with -ImportClipboard.'
+  }
+  $profile = Import-Clixml -LiteralPath $Path
+  foreach ($property in @('Version', 'Server', 'ServerPort', 'PortRange', 'Sni', 'Password', 'ObfsPassword')) {
+    if ($null -eq $profile.$property) { throw 'Encrypted Hysteria2 profile is incomplete.' }
+  }
+  if ($profile.Version -ne 1 -or $profile.Password -isnot [Security.SecureString] -or $profile.ObfsPassword -isnot [Security.SecureString]) {
+    throw 'Encrypted Hysteria2 profile is invalid.'
+  }
+  return $profile
+}
+
+if ($ImportClipboard) {
+  Save-Hy2Profile (Get-Hy2ProfileFromClipboard) $ProfileStorePath
+}
+
+$storedProfile = Read-Hy2Profile $ProfileStorePath
+$Server = [string]$storedProfile.Server
+$ServerPort = [int]$storedProfile.ServerPort
+$PortRange = [string]$storedProfile.PortRange
+$Sni = [string]$storedProfile.Sni
+if ($Server -notmatch '^[A-Za-z0-9.-]+$') { throw 'Encrypted profile server is invalid.' }
+if ($Sni -notmatch '^[A-Za-z0-9.-]+$') { throw 'Encrypted profile SNI is invalid.' }
+if ($ServerPort -lt 1 -or $ServerPort -gt 65535) { throw 'Encrypted profile port is invalid.' }
+if ($PortRange -notmatch '^\d{1,5}-\d{1,5}$') { throw 'Encrypted profile port range is invalid.' }
+$rangeParts = $PortRange -split '-'
+if ([int]$rangeParts[0] -lt 1 -or [int]$rangeParts[1] -gt 65535 -or [int]$rangeParts[0] -gt [int]$rangeParts[1]) {
+  throw 'Encrypted profile port range is invalid.'
+}
+if ($PrepareProfileOnly) {
+  Write-Output 'HY2_PROFILE_STORE=ready'
+  return
+}
+
+$passwordSecure = $storedProfile.Password
+$obfsPasswordSecure = $storedProfile.ObfsPassword
 $password = $null
 $obfsPassword = $null
 $temporaryProfile = $null
@@ -63,7 +145,7 @@ try {
     (ConvertTo-PosixAssignment 'HY2_PORTS' $PortRange),
     (ConvertTo-PosixAssignment 'HY2_PASSWORD' $password),
     (ConvertTo-PosixAssignment 'HY2_OBFS_PASSWORD' $obfsPassword),
-    (ConvertTo-PosixAssignment 'HY2_SNI' $Server)
+    (ConvertTo-PosixAssignment 'HY2_SNI' $Sni)
   )
   $temporaryProfile = Join-Path ([IO.Path]::GetTempPath()) ("vpn-hy2-$([guid]::NewGuid().ToString('N')).env")
   [IO.File]::WriteAllText($temporaryProfile, (($profileLines -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
@@ -123,4 +205,5 @@ finally {
   $obfsPassword = $null
   $passwordSecure = $null
   $obfsPasswordSecure = $null
+  $storedProfile = $null
 }

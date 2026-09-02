@@ -11,8 +11,14 @@ foreach ($path in @($launcher, $applier, $renamer)) {
 
 $launcherSource = Get-Content -LiteralPath $launcher -Raw
 $applierSource = Get-Content -LiteralPath $applier -Raw
-if ($launcherSource -notmatch 'Read-Host -AsSecureString|finally|File]::Delete') {
-  throw 'The launcher must use masked prompts and remove the temporary secret payload.'
+if ($launcherSource -notmatch '\[switch\]\$ImportClipboard|Get-Clipboard -Raw|Export-Clixml|Import-Clixml|LOCALAPPDATA') {
+  throw 'The launcher must import the supplied URI from the clipboard into a local encrypted Windows profile store.'
+}
+if ($launcherSource -match 'Read-Host -AsSecureString') {
+  throw 'The launcher must not ask the operator to enter Hysteria2 secrets again.'
+}
+if ($launcherSource -notmatch 'finally|File]::Delete') {
+  throw 'The launcher must remove the temporary secret payload after upload.'
 }
 if ($launcherSource -notmatch 'scp\.exe -O') {
   throw 'The launcher must use DSM-compatible legacy SCP.'
@@ -43,6 +49,32 @@ if ($applierSource -match 'cat .*hysteria2\.env|print.*HY2_PASSWORD|echo .*HY2_P
 }
 if ($applierSource -notmatch 'PRIVATE_LOG=\$\{5:\?missing private log file\}') {
   throw 'The HY2 applier must keep the public completion status and private log in separate arguments.'
+}
+
+$profileStoreRoot = Join-Path ([IO.Path]::GetTempPath()) ("vpn-hy2-profile-store-$([guid]::NewGuid().ToString('N'))")
+$profileStore = Join-Path $profileStoreRoot 'hy2-usa-profile.clixml'
+$previousClipboard = Get-Clipboard -Raw -ErrorAction SilentlyContinue
+try {
+  Set-Clipboard -Value 'hy2://fixture-password@fixture-hy2.test:443/?obfs=salamander&obfs-password=fixture-obfs&sni=fixture-hy2.test&mport=20000-50000#fixture'
+  $storeOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launcher -ImportClipboard -PrepareProfileOnly -ProfileStorePath $profileStore
+  if ($LASTEXITCODE -ne 0 -or $storeOutput -notcontains 'HY2_PROFILE_STORE=ready') {
+    throw 'The launcher could not import a clipboard Hysteria2 URI into its encrypted local store.'
+  }
+  $stored = Import-Clixml -LiteralPath $profileStore
+  if ($stored.Server -ne 'fixture-hy2.test' -or $stored.ServerPort -ne 443 -or $stored.PortRange -ne '20000-50000' -or $stored.Sni -ne 'fixture-hy2.test') {
+    throw 'The encrypted store did not retain the non-secret Hysteria2 connection values.'
+  }
+  if ($stored.Password -isnot [Security.SecureString] -or $stored.ObfsPassword -isnot [Security.SecureString]) {
+    throw 'The encrypted store did not retain Hysteria2 secrets as SecureString values.'
+  }
+  $storeText = [IO.File]::ReadAllText($profileStore, [Text.Encoding]::UTF8)
+  if ($storeText.Contains('fixture-password') -or $storeText.Contains('fixture-obfs')) {
+    throw 'The local profile store contains a plaintext Hysteria2 secret.'
+  }
+}
+finally {
+  if ($null -ne $previousClipboard) { Set-Clipboard -Value $previousClipboard } else { Set-Clipboard -Value '' }
+  if (Test-Path -LiteralPath $profileStoreRoot) { Remove-Item -LiteralPath $profileStoreRoot -Recurse -Force }
 }
 
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("vpn-hy2-test-$([guid]::NewGuid().ToString('N'))")
