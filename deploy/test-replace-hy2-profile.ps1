@@ -4,7 +4,8 @@ $launcher = Join-Path $PSScriptRoot 'replace-hy2-profile.ps1'
 $applier = Join-Path $PSScriptRoot 'scripts\replace-hy2-profile.sh'
 $renamer = Join-Path $PSScriptRoot 'scripts\rename-hy2-usa.py'
 $starter = Join-Path $PSScriptRoot 'scripts\start-hy2-profile-replace.sh'
-foreach ($path in @($launcher, $applier, $renamer, $starter)) {
+$statusPolling = Join-Path $PSScriptRoot 'scripts\hy2-status-polling.ps1'
+foreach ($path in @($launcher, $applier, $renamer, $starter, $statusPolling)) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
     throw "Required HY2 replacement source is missing: $path"
   }
@@ -33,6 +34,9 @@ if (-not $launcherSource.Contains("'`$remoteStatus' '`$remoteLog'")) {
 }
 if ($launcherSource -notmatch 'HY2_APPLY=started|HY2 migration did not publish a completion state') {
   throw 'The launcher must wait for a published detached completion state.'
+}
+if ($launcherSource -notmatch 'hy2-status-polling\.ps1' -or $launcherSource -notmatch 'Invoke-Hy2MigrationStatusProbe') {
+  throw 'The launcher must poll HY2 completion through the nonfatal SSH status-probe helper.'
 }
 if ($launcherSource -notmatch 'start-hy2-profile-replace.sh|remoteStarter' -or $launcherSource -match 'sudo /bin/sh -c') {
   throw 'The launcher must start the root applier through the dedicated starter file, not nested shell quoting.'
@@ -108,6 +112,19 @@ finally {
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("vpn-hy2-test-$([guid]::NewGuid().ToString('N'))")
 [IO.Directory]::CreateDirectory($fixtureRoot) | Out-Null
 try {
+  . $statusPolling
+  $fakeSsh = Join-Path $fixtureRoot 'fake-ssh.cmd'
+  [IO.File]::WriteAllText($fakeSsh, "@echo off`r`necho simulated SSH reset 1>&2`r`nexit /b 255`r`n", [Text.ASCIIEncoding]::new())
+  $transientProbe = Invoke-Hy2MigrationStatusProbe -SshExecutable $fakeSsh -Port 5004 -SshTarget 'test@example.invalid' -RemoteStatus '/tmp/status.txt'
+  if ($transientProbe.ExitCode -ne 255 -or -not [string]::IsNullOrEmpty($transientProbe.Output)) {
+    throw 'A transient SSH reset must be returned as an empty nonfatal status probe.'
+  }
+  [IO.File]::WriteAllText($fakeSsh, "@echo off`r`necho RESULT=success`r`nexit /b 0`r`n", [Text.ASCIIEncoding]::new())
+  $successProbe = Invoke-Hy2MigrationStatusProbe -SshExecutable $fakeSsh -Port 5004 -SshTarget 'test@example.invalid' -RemoteStatus '/tmp/status.txt'
+  if ($successProbe.ExitCode -ne 0 -or $successProbe.Output -ne 'RESULT=success') {
+    throw 'A published HY2 completion state must remain readable after a transient SSH reset.'
+  }
+
   $profilePath = Join-Path $fixtureRoot 'hysteria2.env'
   $configPath = Join-Path $fixtureRoot 'config.yaml'
   $rulesPath = Join-Path $fixtureRoot 'rules'

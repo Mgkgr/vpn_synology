@@ -158,9 +158,11 @@ try {
   $sourceApplier = Join-Path $PSScriptRoot 'scripts\replace-hy2-profile.sh'
   $sourceRenamer = Join-Path $PSScriptRoot 'scripts\rename-hy2-usa.py'
   $sourceStarter = Join-Path $PSScriptRoot 'scripts\start-hy2-profile-replace.sh'
-  foreach ($path in @($sourceApplier, $sourceRenamer, $sourceStarter)) {
+  $sourceStatusPolling = Join-Path $PSScriptRoot 'scripts\hy2-status-polling.ps1'
+  foreach ($path in @($sourceApplier, $sourceRenamer, $sourceStarter, $sourceStatusPolling)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required source is missing: $path" }
   }
+  . $sourceStatusPolling
 
   $profileLines = @(
     (ConvertTo-PosixAssignment 'HY2_SERVER' $Server),
@@ -203,8 +205,9 @@ try {
   $completed = $false
   while ([DateTime]::UtcNow -lt $deadline) {
     Start-Sleep -Seconds 2
-    $statusOutput = & ssh.exe -p $Port $sshTarget "if [ -f '$remoteStatus' ]; then cat '$remoteStatus'; else exit 3; fi" 2>&1
-    $statusCode = $LASTEXITCODE
+    $statusProbe = Invoke-Hy2MigrationStatusProbe -SshExecutable 'ssh.exe' -Port $Port -SshTarget $sshTarget -RemoteStatus $remoteStatus
+    $statusOutput = $statusProbe.Output
+    $statusCode = $statusProbe.ExitCode
     if ($statusCode -eq 0 -and $statusOutput) {
       $text = ($statusOutput | Out-String).Trim()
       if ($text -match '(?m)^RESULT=(success|failed)$') {
