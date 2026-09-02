@@ -9,7 +9,7 @@ set -eu
 SOURCE_PROFILE=${1:?missing input profile}
 RENAMER=${2:?missing rename-hy2-usa.py helper}
 STATUS_FILE=${3:?missing public status file}
-PRIVATE_LOG=${5:?missing private log file}
+PRIVATE_LOG=${4:?missing private log file}
 GATEWAY_DIR=${GATEWAY_DIR:-/volume1/docker/vpn-gateway}
 CONFIG=${CONFIG:-$GATEWAY_DIR/mihomo/config.yaml}
 RULES_DIR=${RULES_DIR:-$GATEWAY_DIR/mihomo/rules}

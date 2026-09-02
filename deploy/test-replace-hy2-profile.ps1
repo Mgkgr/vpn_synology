@@ -55,7 +55,7 @@ foreach ($required in @(
 if ($applierSource -match 'cat .*hysteria2\.env|print.*HY2_PASSWORD|echo .*HY2_PASSWORD') {
   throw 'The HY2 applier must never print the secret profile.'
 }
-if ($applierSource -notmatch 'PRIVATE_LOG=\$\{5:\?missing private log file\}') {
+if ($applierSource -notmatch 'PRIVATE_LOG=\$\{4:\?missing private log file\}') {
   throw 'The HY2 applier must keep the public completion status and private log in separate arguments.'
 }
 
