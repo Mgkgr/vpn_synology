@@ -43,27 +43,49 @@ function Get-UriQueryValue([string]$Query, [string]$Name) {
 
 function Get-Hy2ProfileFromClipboard {
   $clipboard = Get-Clipboard -Raw -ErrorAction Stop
-  $match = [regex]::Match([string]$clipboard, '(?i)hy2://[^\s]+')
-  if (-not $match.Success) { throw 'Clipboard does not contain a Hysteria2 URI.' }
-  $candidate = [System.Net.WebUtility]::HtmlDecode($match.Value).Trim() -replace '\\@', '@'
-  try { $uri = [Uri]$candidate } catch { throw 'Clipboard Hysteria2 URI is invalid.' }
-  if ($uri.Scheme -ne 'hy2' -or -not $uri.Host -or -not $uri.UserInfo -or $uri.Port -lt 1) {
-    throw 'Clipboard Hysteria2 URI is incomplete.'
+  $text = [string]$clipboard
+  $match = [regex]::Match($text, '(?i)hy2://[^\s]+')
+  if ($match.Success) {
+    $candidate = [System.Net.WebUtility]::HtmlDecode($match.Value).Trim() -replace '\\@', '@'
+    try { $uri = [Uri]$candidate } catch { throw 'Clipboard Hysteria2 URI is invalid.' }
+    if ($uri.Scheme -ne 'hy2' -or -not $uri.Host -or -not $uri.UserInfo -or $uri.Port -lt 1) {
+      throw 'Clipboard Hysteria2 URI is incomplete.'
+    }
+    $obfs = Get-UriQueryValue $uri.Query 'obfs-password'
+    $sni = Get-UriQueryValue $uri.Query 'sni'
+    $portRange = (Get-UriQueryValue $uri.Query 'mport') -replace ':', '-'
+    if ((Get-UriQueryValue $uri.Query 'obfs') -ne 'salamander' -or -not $obfs -or -not $portRange) {
+      throw 'Clipboard Hysteria2 URI is missing Salamander or port-hopping settings.'
+    }
+    return [pscustomobject]@{
+      Version = 1
+      Server = $uri.Host
+      ServerPort = $uri.Port
+      PortRange = $portRange
+      Sni = if ($sni) { $sni } else { $uri.Host }
+      Password = ConvertTo-SecureString ([Uri]::UnescapeDataString($uri.UserInfo)) -AsPlainText -Force
+      ObfsPassword = ConvertTo-SecureString $obfs -AsPlainText -Force
+    }
   }
-  $obfs = Get-UriQueryValue $uri.Query 'obfs-password'
-  $sni = Get-UriQueryValue $uri.Query 'sni'
-  $portRange = (Get-UriQueryValue $uri.Query 'mport') -replace ':', '-'
-  if ((Get-UriQueryValue $uri.Query 'obfs') -ne 'salamander' -or -not $obfs -or -not $portRange) {
-    throw 'Clipboard Hysteria2 URI is missing Salamander or port-hopping settings.'
+
+  $normalized = $text -replace '\\_', '_'
+  $start = $normalized.IndexOf('{')
+  $end = $normalized.LastIndexOf('}')
+  if ($start -lt 0 -or $end -le $start) { throw 'Clipboard does not contain a Hysteria2 URI or OpenWRT outbound.' }
+  try { $outbound = $normalized.Substring($start, $end - $start + 1) | ConvertFrom-Json -ErrorAction Stop } catch { throw 'Clipboard OpenWRT outbound is invalid.' }
+  $ports = @($outbound.server_ports)
+  $portRange = if ($ports.Count -eq 1) { ([string]$ports[0]) -replace ':', '-' } else { '' }
+  if ($outbound.type -ne 'hysteria2' -or -not $outbound.server -or -not $outbound.password -or -not $outbound.tls.server_name -or $outbound.obfs.type -ne 'salamander' -or -not $outbound.obfs.password -or -not $portRange) {
+    throw 'Clipboard OpenWRT outbound is incomplete.'
   }
   [pscustomobject]@{
     Version = 1
-    Server = $uri.Host
-    ServerPort = $uri.Port
+    Server = [string]$outbound.server
+    ServerPort = [int]$outbound.server_port
     PortRange = $portRange
-    Sni = if ($sni) { $sni } else { $uri.Host }
-    Password = ConvertTo-SecureString ([Uri]::UnescapeDataString($uri.UserInfo)) -AsPlainText -Force
-    ObfsPassword = ConvertTo-SecureString $obfs -AsPlainText -Force
+    Sni = [string]$outbound.tls.server_name
+    Password = ConvertTo-SecureString ([string]$outbound.password) -AsPlainText -Force
+    ObfsPassword = ConvertTo-SecureString ([string]$outbound.obfs.password) -AsPlainText -Force
   }
 }
 
@@ -135,7 +157,8 @@ try {
 
   $sourceApplier = Join-Path $PSScriptRoot 'scripts\replace-hy2-profile.sh'
   $sourceRenamer = Join-Path $PSScriptRoot 'scripts\rename-hy2-usa.py'
-  foreach ($path in @($sourceApplier, $sourceRenamer)) {
+  $sourceStarter = Join-Path $PSScriptRoot 'scripts\start-hy2-profile-replace.sh'
+  foreach ($path in @($sourceApplier, $sourceRenamer, $sourceStarter)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required source is missing: $path" }
   }
 
@@ -154,6 +177,7 @@ try {
   $sshTarget = "$UserName@$HostName"
   $remoteApplier = "/tmp/vpn-hy2-replace-$runId.sh"
   $remoteRenamer = "/tmp/vpn-hy2-rename-$runId.py"
+  $remoteStarter = "/tmp/vpn-hy2-start-$runId.sh"
   $remoteProfile = "/tmp/vpn-hy2-profile-$runId.env"
   $remoteStatus = "/tmp/vpn-hy2-status-$runId.txt"
   $remoteLog = "/tmp/vpn-hy2-log-$runId.txt"
@@ -162,14 +186,14 @@ try {
   foreach ($item in @(
     @{ Local = $sourceApplier; Remote = $remoteApplier; Description = 'HY2 replacement script' },
     @{ Local = $sourceRenamer; Remote = $remoteRenamer; Description = 'HY2 migration helper' },
+    @{ Local = $sourceStarter; Remote = $remoteStarter; Description = 'HY2 migration starter' },
     @{ Local = $temporaryProfile; Remote = $remoteProfile; Description = 'HY2 input profile' }
   )) {
     & scp.exe -O -P $Port $item.Local "${sshTarget}:$($item.Remote)"
     if ($LASTEXITCODE -ne 0) { throw "$($item.Description) upload failed." }
   }
 
-  $detachedCommand = "umask 077; nohup /bin/sh '$remoteApplier' '$remoteProfile' '$remoteRenamer' '$remoteStatus' '$remoteLog' > '$remoteLog' 2>&1 & echo `\$! > '$remoteLog.pid'"
-  $remoteCommand = "chmod 700 '$remoteApplier'; chmod 700 '$remoteRenamer'; chmod 600 '$remoteProfile'; rm -f '$remoteStatus' '$remoteLog' '$remoteLog.pid'; sudo /bin/sh -c `"$detachedCommand`"; status=`$?; if [ `$status -eq 0 ]; then echo HY2_APPLY=started; fi; exit `$status"
+  $remoteCommand = "chmod 700 '$remoteApplier'; chmod 700 '$remoteRenamer'; chmod 700 '$remoteStarter'; chmod 600 '$remoteProfile'; rm -f '$remoteStatus' '$remoteLog' '$remoteLog.pid'; sudo /bin/sh '$remoteStarter' '$remoteApplier' '$remoteProfile' '$remoteRenamer' '$remoteStatus' '$remoteLog'; status=`$?; if [ `$status -eq 0 ]; then echo HY2_APPLY=started; fi; exit `$status"
   & ssh.exe -tt -p $Port $sshTarget $remoteCommand
   if ($LASTEXITCODE -ne 0) {
     throw 'HY2 migration could not be started.'

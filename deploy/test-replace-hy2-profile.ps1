@@ -3,7 +3,8 @@ $ErrorActionPreference = 'Stop'
 $launcher = Join-Path $PSScriptRoot 'replace-hy2-profile.ps1'
 $applier = Join-Path $PSScriptRoot 'scripts\replace-hy2-profile.sh'
 $renamer = Join-Path $PSScriptRoot 'scripts\rename-hy2-usa.py'
-foreach ($path in @($launcher, $applier, $renamer)) {
+$starter = Join-Path $PSScriptRoot 'scripts\start-hy2-profile-replace.sh'
+foreach ($path in @($launcher, $applier, $renamer, $starter)) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
     throw "Required HY2 replacement source is missing: $path"
   }
@@ -11,8 +12,9 @@ foreach ($path in @($launcher, $applier, $renamer)) {
 
 $launcherSource = Get-Content -LiteralPath $launcher -Raw
 $applierSource = Get-Content -LiteralPath $applier -Raw
-if ($launcherSource -notmatch '\[switch\]\$ImportClipboard|Get-Clipboard -Raw|Export-Clixml|Import-Clixml|LOCALAPPDATA') {
-  throw 'The launcher must import the supplied URI from the clipboard into a local encrypted Windows profile store.'
+$starterSource = Get-Content -LiteralPath $starter -Raw
+if ($launcherSource -notmatch '\[switch\]\$ImportClipboard|Get-Clipboard -Raw|Export-Clixml|Import-Clixml|LOCALAPPDATA|ConvertFrom-Json') {
+  throw 'The launcher must import either a Hysteria2 URI or an OpenWRT outbound from the clipboard into a local encrypted Windows profile store.'
 }
 if ($launcherSource -match 'Read-Host -AsSecureString') {
   throw 'The launcher must not ask the operator to enter Hysteria2 secrets again.'
@@ -31,6 +33,12 @@ if (-not $launcherSource.Contains("'`$remoteStatus' '`$remoteLog'")) {
 }
 if ($launcherSource -notmatch 'HY2_APPLY=started|HY2 migration did not publish a completion state') {
   throw 'The launcher must wait for a published detached completion state.'
+}
+if ($launcherSource -notmatch 'start-hy2-profile-replace.sh|remoteStarter' -or $launcherSource -match 'sudo /bin/sh -c') {
+  throw 'The launcher must start the root applier through the dedicated starter file, not nested shell quoting.'
+}
+if ($starterSource -notmatch 'nohup /bin/sh|printf.*\$!|STATUS_FILE') {
+  throw 'The dedicated starter must record the root applier PID without exposing profile data.'
 }
 if ($launcherSource -match '(?im)^\s*\$?(password|obfsPassword)\s*=\s*''[^'']+''') {
   throw 'The launcher must not embed a default connection secret.'
@@ -70,6 +78,26 @@ try {
   $storeText = [IO.File]::ReadAllText($profileStore, [Text.Encoding]::UTF8)
   if ($storeText.Contains('fixture-password') -or $storeText.Contains('fixture-obfs')) {
     throw 'The local profile store contains a plaintext Hysteria2 secret.'
+  }
+
+  Set-Clipboard -Value @'
+{
+  "type": "hysteria2",
+  "server": "fixture-openwrt.test",
+  "server_port": 443,
+  "password": "fixture-openwrt-password",
+  "tls": { "enabled": true, "server_name": "fixture-openwrt.test" },
+  "server_ports": ["20000:50000"],
+  "obfs": { "type": "salamander", "password": "fixture-openwrt-obfs" }
+}
+'@
+  $openWrtOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launcher -ImportClipboard -PrepareProfileOnly -ProfileStorePath $profileStore
+  if ($LASTEXITCODE -ne 0 -or $openWrtOutput -notcontains 'HY2_PROFILE_STORE=ready') {
+    throw 'The launcher could not import an OpenWRT Hysteria2 outbound from the clipboard.'
+  }
+  $openWrtStored = Import-Clixml -LiteralPath $profileStore
+  if ($openWrtStored.Server -ne 'fixture-openwrt.test' -or $openWrtStored.PortRange -ne '20000-50000' -or $openWrtStored.Sni -ne 'fixture-openwrt.test') {
+    throw 'The OpenWRT Hysteria2 import retained incorrect connection values.'
   }
 }
 finally {

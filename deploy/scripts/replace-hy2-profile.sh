@@ -29,7 +29,7 @@ safe_status() {
 }
 
 cleanup() {
-  rm -f "$SOURCE_PROFILE" "$RENAMER" "$PRIVATE_LOG" "${PRIVATE_LOG}.pid"
+  rm -f "$SOURCE_PROFILE" "$RENAMER" "$PRIVATE_LOG" "${PRIVATE_LOG}.pid" "$0"
 }
 trap cleanup EXIT INT TERM
 
