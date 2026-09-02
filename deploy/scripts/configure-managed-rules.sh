@@ -30,7 +30,7 @@ archive="$BACKUP_DIR/mihomo-before-managed-rules-$stamp.tar.enc"
 tar -C "$GATEWAY_DIR" -cf - mihomo/config.yaml mihomo/rules | openssl enc -aes-256-cbc -pbkdf2 -salt -pass "file:$DASHBOARD_SECRET_FILE" -out "$archive"
 chmod 0600 "$archive"
 
-for file in managed-direct.txt managed-fallback.txt managed-wg-imp.txt managed-hy2-nl.txt; do
+for file in managed-direct.txt managed-fallback.txt managed-wg-imp.txt managed-hy2-usa.txt; do
   [ -f "$RULES_DIR/$file" ] || : > "$RULES_DIR/$file"
   chown "$APP_UID:$APP_GID" "$RULES_DIR/$file"
   chmod 0660 "$RULES_DIR/$file"
@@ -64,11 +64,11 @@ provider_block = """    path: ./rules/direct.txt
     behavior: classical
     format: text
     path: ./rules/managed-wg-imp.txt
-  managed-hy2-nl:
+  managed-hy2-usa:
     type: file
     behavior: classical
     format: text
-    path: ./rules/managed-hy2-nl.txt
+    path: ./rules/managed-hy2-usa.txt
   managed-fallback:
     type: file
     behavior: classical
@@ -79,15 +79,15 @@ rule_anchor = "  - RULE-SET,direct-custom,DIRECT\n"
 rule_block = """  - RULE-SET,direct-custom,DIRECT
   - RULE-SET,managed-direct,DIRECT
   - RULE-SET,managed-wg-imp,WG-IMP
-  - RULE-SET,managed-hy2-nl,HY2-NL
+  - RULE-SET,managed-hy2-usa,HY2-USA
   - RULE-SET,managed-fallback,VPS-FALLBACK
 """
-provider_names = ("managed-direct", "managed-wg-imp", "managed-hy2-nl", "managed-fallback")
+provider_names = ("managed-direct", "managed-wg-imp", "managed-hy2-usa", "managed-fallback")
 provider_count = sum(f"  {name}:\n" in text for name in provider_names)
 rule_lines = (
     "  - RULE-SET,managed-direct,DIRECT\n",
     "  - RULE-SET,managed-wg-imp,WG-IMP\n",
-    "  - RULE-SET,managed-hy2-nl,HY2-NL\n",
+    "  - RULE-SET,managed-hy2-usa,HY2-USA\n",
     "  - RULE-SET,managed-fallback,VPS-FALLBACK\n",
 )
 rule_count = sum(line in text for line in rule_lines)

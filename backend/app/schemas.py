@@ -125,6 +125,7 @@ class OverviewResponse(BaseModel):
     traffic: TrafficResponse | None
     services: list["ServiceStatusResponse"]
     fallback: "FallbackStateResponse"
+    exit_health: list["ExitHealthResponse"]
 
 
 class ServiceStatusResponse(BaseModel):
@@ -138,8 +139,18 @@ class ServiceStatusResponse(BaseModel):
 
 class FallbackStateResponse(BaseModel):
     primary: Literal["WG-IMP"] = "WG-IMP"
-    reserve: Literal["HY2-NL"] = "HY2-NL"
-    selected: Literal["WG-IMP", "HY2-NL"] | None
+    reserve: Literal["HY2-USA"] = "HY2-USA"
+    selected: Literal["WG-IMP", "HY2-USA"] | None
+
+
+class ExitHealthResponse(BaseModel):
+    """One complete independently measured health-check cycle for an exit."""
+
+    name: Literal["WG-IMP", "HY2-USA"]
+    observed_at: datetime | None
+    succeeded: bool | None
+    succeeded_count: int = Field(ge=0)
+    total_count: int = Field(ge=0)
 
 
 class RouteGroupResponse(BaseModel):
@@ -187,7 +198,7 @@ class ProbeTargetEditRequest(_StrictModel):
 
 class ProbeDiagnosisRequest(_StrictModel):
     target_key: str = Field(min_length=1, max_length=64)
-    outbound: Literal["WG-IMP", "HY2-NL"]
+    outbound: Literal["WG-IMP", "HY2-USA"]
 
 
 class ProbeDiagnosticStepResponse(BaseModel):
@@ -203,7 +214,7 @@ class ProbeDiagnosticDnsResponse(ProbeDiagnosticStepResponse):
 
 class ProbeDiagnosisResponse(BaseModel):
     observed_at: datetime
-    outbound: Literal["WG-IMP", "HY2-NL"]
+    outbound: Literal["WG-IMP", "HY2-USA"]
     endpoint: str
     conclusion: Literal["ok", "controller_unavailable", "dns_failure", "dns_no_address", "exit_failure"]
     conclusion_text: str
@@ -214,11 +225,11 @@ class ProbeDiagnosisResponse(BaseModel):
 
 class RouteProbeResponse(BaseModel):
     observed_at: datetime
-    target: Literal["WG-IMP", "HY2-NL"]
+    target: Literal["WG-IMP", "HY2-USA"]
     succeeded: bool
     latency_ms: int | None = Field(default=None, ge=0)
     endpoint: str | None
-    outbound: Literal["WG-IMP", "HY2-NL"] | None
+    outbound: Literal["WG-IMP", "HY2-USA"] | None
     status: str | None
     status_code: int | None
     reason: str | None
@@ -228,8 +239,8 @@ class RouteSwitchResponse(BaseModel):
     observed_at: datetime
     route: str
     action: str
-    previous_outbound: Literal["WG-IMP", "HY2-NL"] | None
-    new_outbound: Literal["WG-IMP", "HY2-NL"] | None
+    previous_outbound: Literal["WG-IMP", "HY2-USA"] | None
+    new_outbound: Literal["WG-IMP", "HY2-USA"] | None
 
 
 class ControllerRuleResponse(BaseModel):
@@ -265,7 +276,7 @@ class ManagedRulePolicyResponse(BaseModel):
     kind: Literal["GEOSITE", "GEOIP"]
     category: str
     label: str
-    action: Literal["DIRECT", "VPS-FALLBACK", "WG-IMP", "HY2-NL"]
+    action: Literal["DIRECT", "VPS-FALLBACK", "WG-IMP", "HY2-USA"]
     enabled: bool
 
 
@@ -279,7 +290,7 @@ class ManagedRuleCategoryResponse(BaseModel):
 class ManagedRulePolicyRequest(_StrictModel):
     kind: Literal["GEOSITE", "GEOIP"]
     category: str = Field(min_length=1, max_length=128)
-    action: Literal["DIRECT", "VPS-FALLBACK", "WG-IMP", "HY2-NL"]
+    action: Literal["DIRECT", "VPS-FALLBACK", "WG-IMP", "HY2-USA"]
     enabled: bool = True
 
 

@@ -16,7 +16,7 @@ INTERVAL_SECONDS=${INTERVAL_SECONDS:-30}
 "$DOCKER_BIN" inspect "$MIHOMO_CONTAINER" >/dev/null 2>&1 || { echo 'Mihomo container is missing' >&2; exit 1; }
 
 # Restrict the edit to the one known group and refuse a configuration where
-# this gateway is no longer the WG-IMP -> HY2-NL fallback design.
+# this gateway is no longer the WG-IMP -> HY2-USA fallback design.
 fallback_block=$(awk '
   /^  - name: VPS-FALLBACK$/ { capture = 1 }
   capture && /^  - name: / && $0 != "  - name: VPS-FALLBACK" { exit }
@@ -24,7 +24,7 @@ fallback_block=$(awk '
 ' "$CONFIG")
 printf '%s\n' "$fallback_block" | grep -q '^    type: fallback$' || { echo 'VPS-FALLBACK is not a fallback group' >&2; exit 1; }
 printf '%s\n' "$fallback_block" | grep -q '^      - WG-IMP$' || { echo 'WG-IMP is missing from fallback' >&2; exit 1; }
-printf '%s\n' "$fallback_block" | grep -q '^      - HY2-NL$' || { echo 'HY2-NL is missing from fallback' >&2; exit 1; }
+printf '%s\n' "$fallback_block" | grep -q '^      - HY2-USA$' || { echo 'HY2-USA is missing from fallback' >&2; exit 1; }
 [ "$(printf '%s\n' "$fallback_block" | grep -c '^    interval: ' || true)" = 1 ] || { echo 'VPS-FALLBACK must contain one interval line' >&2; exit 1; }
 
 backup_dir="$PROJECT_DIR/backups/pre-fallback-policy-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -70,6 +70,6 @@ fi
 echo 'RESULT=success'
 echo "BACKUP_DIR=$backup_dir"
 echo 'FALLBACK_GROUP=VPS-FALLBACK'
-echo 'FALLBACK_ORDER=WG-IMP,HY2-NL'
+echo 'FALLBACK_ORDER=WG-IMP,HY2-USA'
 echo "FALLBACK_INTERVAL_SECONDS=$INTERVAL_SECONDS"
 echo 'FAILOVER_EXERCISE=not_run'

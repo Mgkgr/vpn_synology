@@ -56,7 +56,7 @@ for selector in $SELECTORS; do
   for mapping in \
     'DIRECT:managed-direct.txt' \
     'WG-IMP:managed-wg-imp.txt' \
-    'HY2-NL:managed-hy2-nl.txt' \
+    'HY2-USA:managed-hy2-usa.txt' \
     'VPS-FALLBACK:managed-fallback.txt'; do
     action=${mapping%%:*}
     filename=${mapping#*:}
@@ -81,7 +81,7 @@ awk '
   /^  - / {
     payload = $0
     sub(/^  - /, "", payload)
-    if (payload ~ /^RULE-SET,(direct-custom|managed-direct|managed-wg-imp|managed-hy2-nl|managed-fallback),/ ||
+    if (payload ~ /^RULE-SET,(direct-custom|managed-direct|managed-wg-imp|managed-hy2-usa|managed-fallback),/ ||
         payload ~ /^GEOSITE,/ || payload ~ /^GEOIP,/ || payload ~ /^MATCH/) {
       printf "RULE_LINE_%d=%s\n", NR, payload
     }

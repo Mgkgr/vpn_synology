@@ -1,8 +1,6 @@
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory)]
-  [ValidateNotNullOrEmpty()]
-  [string]$InputPath,
+  [string]$InputPath = '',
   [string[]]$AdditionalRule = @(),
   [string]$HostName = 'roaring.crazedns.ru',
   [int]$Port = 5004,
@@ -12,7 +10,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-if (-not (Test-Path -LiteralPath $InputPath -PathType Leaf)) {
+if (-not $InputPath -and $AdditionalRule.Count -eq 0) {
+  throw 'Provide InputPath, AdditionalRule, or both.'
+}
+if ($InputPath -and -not (Test-Path -LiteralPath $InputPath -PathType Leaf)) {
   throw "DIRECT import source is missing: $InputPath"
 }
 
@@ -33,7 +34,12 @@ $remoteInput = "/tmp/vpn-dashboard-direct-input-$identifier.txt"
 $sshTarget = "$UserName@$HostName"
 
 try {
-  Copy-Item -LiteralPath $InputPath -Destination $temporaryInput -Force
+  if ($InputPath) {
+    Copy-Item -LiteralPath $InputPath -Destination $temporaryInput -Force
+  }
+  else {
+    [System.IO.File]::WriteAllText($temporaryInput, '', [System.Text.UTF8Encoding]::new($false))
+  }
   if ($AdditionalRule.Count -gt 0) {
     $append = [Environment]::NewLine + [string]::Join([Environment]::NewLine, $AdditionalRule) + [Environment]::NewLine
     [System.IO.File]::AppendAllText($temporaryInput, $append, [System.Text.UTF8Encoding]::new($false))

@@ -49,6 +49,7 @@ from app.schemas import (
     HostContainerResponse,
     HostHealthResponse,
     FallbackStateResponse,
+    ExitHealthResponse,
     JournalEventResponse,
     JournalResponse,
     LoginRequest,
@@ -197,6 +198,7 @@ def build_api_router() -> APIRouter:
         service_states, stored_fallback = _load_observability_state(runtime)
         traffic = _load_latest_gateway_traffic(runtime)
         fallback = FallbackStateResponse(selected=_selected_fallback_from_groups(groups) or stored_fallback.selected)
+        exit_health = _load_exit_health(runtime)
         return OverviewResponse(
             client_count=len(clients),
             clients=[_client_response(client) for client in clients],
@@ -204,6 +206,7 @@ def build_api_router() -> APIRouter:
             traffic=traffic,
             services=service_states,
             fallback=fallback,
+            exit_health=exit_health,
         )
 
     @router.get("/host-health", response_model=HostHealthResponse)
@@ -1145,7 +1148,7 @@ def _policy_detail(item: Any) -> str:
     )
 
 
-_FALLBACK_OUTBOUNDS = frozenset({"WG-IMP", "HY2-NL"})
+_FALLBACK_OUTBOUNDS = frozenset({"WG-IMP", "HY2-USA"})
 _SERVICE_NAMES = frozenset({"wg-easy", "mihomo", "metacubexd", "uptime-kuma"})
 
 
@@ -1192,9 +1195,42 @@ def _selected_fallback_from_groups(groups: Any) -> str | None:
     for group in groups:
         choices = getattr(group, "proxies", ())
         selected = getattr(group, "now", None)
-        if {"WG-IMP", "HY2-NL"}.issubset(choices) and selected in _FALLBACK_OUTBOUNDS:
+        if {"WG-IMP", "HY2-USA"}.issubset(choices) and selected in _FALLBACK_OUTBOUNDS:
             return selected
     return None
+
+
+def _load_exit_health(runtime: RuntimeContainer) -> list[ExitHealthResponse]:
+    """Return the last complete independent delay-check cycle for every exit.
+
+    The fallback group's selected member is deliberately unrelated: an idle
+    reserve may be healthy, and a selected primary may have a failed check.
+    All checks in one collector cycle share the timestamp, which identifies
+    exactly the observations that belong to the same result.
+    """
+
+    with runtime.session_factory() as session:
+        rows = session.scalars(
+            select(ProbeEvent)
+            .where(ProbeEvent.target.in_(_FALLBACK_OUTBOUNDS))
+            .order_by(ProbeEvent.observed_at.desc(), ProbeEvent.id.desc())
+            .limit(500)
+        ).all()
+
+    health: list[ExitHealthResponse] = []
+    for outbound in ("WG-IMP", "HY2-USA"):
+        latest = next((row.observed_at for row in rows if row.target == outbound), None)
+        cycle = [row for row in rows if row.target == outbound and row.observed_at == latest] if latest is not None else []
+        health.append(
+            ExitHealthResponse(
+                name=outbound,
+                observed_at=latest,
+                succeeded=all(row.succeeded for row in cycle) if cycle else None,
+                succeeded_count=sum(1 for row in cycle if row.succeeded),
+                total_count=len(cycle),
+            )
+        )
+    return health
 
 
 def _load_route_activity(runtime: RuntimeContainer) -> tuple[list[RouteProbeResponse], RouteSwitchResponse | None]:

@@ -103,7 +103,7 @@ class InvalidRules:
 
 class LiveFallbackMihomo(FakeMihomo):
     async def groups(self):
-        return [ProxyGroup("VPS-FALLBACK", "Fallback", ("WG-IMP", "HY2-NL"), "WG-IMP")]
+        return [ProxyGroup("VPS-FALLBACK", "Fallback", ("WG-IMP", "HY2-USA"), "WG-IMP")]
 
 
 class FakePolicyMihomo(FakeMihomo):
@@ -112,7 +112,7 @@ class FakePolicyMihomo(FakeMihomo):
             SimpleNamespace(name="managed-direct"),
             SimpleNamespace(name="managed-fallback"),
             SimpleNamespace(name="managed-wg-imp"),
-            SimpleNamespace(name="managed-hy2-nl"),
+            SimpleNamespace(name="managed-hy2-usa"),
         ]
 
 
@@ -316,7 +316,7 @@ def test_live_fallback_selection_overrides_a_stored_observation(route_parts) -> 
                 succeeded=True,
                 latency_ms=None,
                 endpoint=None,
-                outbound="HY2-NL",
+                outbound="HY2-USA",
                 status="selected",
                 status_code=None,
                 error_text=None,
@@ -397,7 +397,7 @@ def test_overview_and_routes_serialize_collected_state_without_details(route_par
                     succeeded=True,
                     latency_ms=None,
                     endpoint=None,
-                    outbound="HY2-NL",
+                    outbound="HY2-USA",
                     status="selected",
                     status_code=None,
                     error_text="must not be returned",
@@ -405,11 +405,11 @@ def test_overview_and_routes_serialize_collected_state_without_details(route_par
                 ),
                 ProbeEvent(
                     observed_at=observed_at,
-                    target="HY2-NL",
+                    target="HY2-USA",
                     succeeded=True,
                     latency_ms=42,
                     endpoint="https://www.google.com/generate_204",
-                    outbound="HY2-NL",
+                    outbound="HY2-USA",
                     status="ok",
                     status_code=None,
                     error_text="must not be returned",
@@ -420,7 +420,7 @@ def test_overview_and_routes_serialize_collected_state_without_details(route_par
                     route="AUTO",
                     action="selected_outbound_changed",
                     previous_outbound="WG-IMP",
-                    new_outbound="HY2-NL",
+                    new_outbound="HY2-USA",
                     detail="must not be returned",
                 ),
             ]
@@ -434,22 +434,22 @@ def test_overview_and_routes_serialize_collected_state_without_details(route_par
         "mihomo": False,
         "wg-easy": True,
     }
-    assert overview.json()["fallback"]["selected"] == "HY2-NL"
+    assert overview.json()["fallback"]["selected"] == "HY2-USA"
     assert routes.status_code == 200
     payload = routes.json()
     assert payload["fallback"] == {
         "primary": "WG-IMP",
-        "reserve": "HY2-NL",
-        "selected": "HY2-NL",
+        "reserve": "HY2-USA",
+        "selected": "HY2-USA",
     }
     assert payload["probes"] == [
         {
             "observed_at": "2026-07-13T12:00:00Z",
-            "target": "HY2-NL",
+            "target": "HY2-USA",
             "succeeded": True,
             "latency_ms": 42,
             "endpoint": "https://www.google.com/generate_204",
-            "outbound": "HY2-NL",
+            "outbound": "HY2-USA",
                 "status": "ok",
                 "status_code": None,
                 "reason": None,
@@ -460,9 +460,66 @@ def test_overview_and_routes_serialize_collected_state_without_details(route_par
         "route": "AUTO",
         "action": "selected_outbound_changed",
         "previous_outbound": "WG-IMP",
-        "new_outbound": "HY2-NL",
+        "new_outbound": "HY2-USA",
     }
     assert "must not be returned" not in f"{overview.text}{routes.text}"
+
+
+def test_overview_reports_each_exit_last_independent_probe_cycle(route_parts) -> None:
+    client, factory = route_parts
+    older = datetime(2026, 7, 13, 11, tzinfo=UTC)
+    latest = datetime(2026, 7, 13, 12, tzinfo=UTC)
+    with factory.begin() as session:
+        session.add_all(
+            [
+                ProbeEvent(
+                    observed_at=older, target="HY2-USA", succeeded=True, latency_ms=21,
+                    endpoint="https://old.example/", outbound="HY2-USA", status="ok", status_code=None,
+                    error_text="private", detail="private",
+                ),
+                ProbeEvent(
+                    observed_at=latest, target="WG-IMP", succeeded=True, latency_ms=20,
+                    endpoint="https://one.example/", outbound="WG-IMP", status="ok", status_code=None,
+                    error_text="private", detail="private",
+                ),
+                ProbeEvent(
+                    observed_at=latest, target="WG-IMP", succeeded=False, latency_ms=None,
+                    endpoint="https://two.example/", outbound="WG-IMP", status="failed", status_code=None,
+                    error_text="private", detail="private",
+                ),
+                ProbeEvent(
+                    observed_at=latest, target="HY2-USA", succeeded=False, latency_ms=None,
+                    endpoint="https://one.example/", outbound="HY2-USA", status="failed", status_code=None,
+                    error_text="private", detail="private",
+                ),
+                ProbeEvent(
+                    observed_at=latest, target="HY2-USA", succeeded=True, latency_ms=35,
+                    endpoint="https://two.example/", outbound="HY2-USA", status="ok", status_code=None,
+                    error_text="private", detail="private",
+                ),
+            ]
+        )
+
+    response = client.get("/api/overview")
+
+    assert response.status_code == 200
+    assert response.json()["exit_health"] == [
+        {
+            "name": "WG-IMP",
+            "observed_at": "2026-07-13T12:00:00Z",
+            "succeeded": False,
+            "succeeded_count": 1,
+            "total_count": 2,
+        },
+        {
+            "name": "HY2-USA",
+            "observed_at": "2026-07-13T12:00:00Z",
+            "succeeded": False,
+            "succeeded_count": 1,
+            "total_count": 2,
+        },
+    ]
+    assert "private" not in response.text
 
 
 def test_traffic_usage_uses_stored_monthly_deltas_for_the_requested_period(route_parts) -> None:
@@ -547,11 +604,11 @@ def test_journal_filters_real_probe_and_route_fields_on_the_server(route_parts) 
                 ),
                 ProbeEvent(
                     observed_at=observed_at,
-                    target="HY2-NL",
+                    target="HY2-USA",
                     succeeded=True,
                     latency_ms=33,
                     endpoint="https://api.github.com/",
-                    outbound="HY2-NL",
+                    outbound="HY2-USA",
                     status="ok",
                     status_code=200,
                     detail="must not be returned",
@@ -562,13 +619,13 @@ def test_journal_filters_real_probe_and_route_fields_on_the_server(route_parts) 
                     route="AUTO",
                     action="selected_outbound_changed",
                     previous_outbound="WG-IMP",
-                    new_outbound="HY2-NL",
+                    new_outbound="HY2-USA",
                     detail="must not be returned",
                 ),
             ]
         )
 
-    response = client.get("/api/journal", params={"outbound": "HY2-NL", "endpoint": "https://api.github.com/"})
+    response = client.get("/api/journal", params={"outbound": "HY2-USA", "endpoint": "https://api.github.com/"})
 
     assert response.status_code == 200
     assert response.json()["events"] == [
@@ -578,7 +635,7 @@ def test_journal_filters_real_probe_and_route_fields_on_the_server(route_parts) 
             "observed_at": "2026-07-13T12:00:00Z",
             "actor": None,
             "action": "probe",
-            "outbound": "HY2-NL",
+            "outbound": "HY2-USA",
             "endpoint": "https://api.github.com/",
             "revision_number": None,
             "succeeded": True,
@@ -854,7 +911,7 @@ def test_openai_uses_the_shared_fallback_by_default_without_overwriting_an_admin
 
 def _prepare_managed_rule_files(rules_dir) -> None:
     rules_dir.mkdir(parents=True, exist_ok=True)
-    for filename in ("managed-direct.txt", "managed-wg-imp.txt", "managed-hy2-nl.txt", "managed-fallback.txt"):
+    for filename in ("managed-direct.txt", "managed-wg-imp.txt", "managed-hy2-usa.txt", "managed-fallback.txt"):
         (rules_dir / filename).write_text("", encoding="utf-8")
 
 

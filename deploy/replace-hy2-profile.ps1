@@ -5,7 +5,9 @@ param(
   [string]$UserName = 'prometei',
   [string]$Server = 'dev.failusha.digital',
   [int]$ServerPort = 443,
-  [string]$PortRange = '20000-50000'
+  [string]$PortRange = '20000-50000',
+  [ValidateRange(30, 180)]
+  [int]$CompletionTimeoutSeconds = 120
 )
 
 Set-StrictMode -Version Latest
@@ -50,7 +52,8 @@ try {
   }
 
   $sourceApplier = Join-Path $PSScriptRoot 'scripts\replace-hy2-profile.sh'
-  foreach ($path in @($sourceApplier)) {
+  $sourceRenamer = Join-Path $PSScriptRoot 'scripts\rename-hy2-usa.py'
+  foreach ($path in @($sourceApplier, $sourceRenamer)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required source is missing: $path" }
   }
 
@@ -68,21 +71,46 @@ try {
   $runId = [guid]::NewGuid().ToString('N')
   $sshTarget = "$UserName@$HostName"
   $remoteApplier = "/tmp/vpn-hy2-replace-$runId.sh"
+  $remoteRenamer = "/tmp/vpn-hy2-rename-$runId.py"
   $remoteProfile = "/tmp/vpn-hy2-profile-$runId.env"
+  $remoteStatus = "/tmp/vpn-hy2-status-$runId.txt"
+  $remoteLog = "/tmp/vpn-hy2-log-$runId.txt"
 
   # DSM SSH commonly lacks the SFTP subsystem; legacy SCP is intentional.
   foreach ($item in @(
     @{ Local = $sourceApplier; Remote = $remoteApplier; Description = 'HY2 replacement script' },
+    @{ Local = $sourceRenamer; Remote = $remoteRenamer; Description = 'HY2 migration helper' },
     @{ Local = $temporaryProfile; Remote = $remoteProfile; Description = 'HY2 input profile' }
   )) {
     & scp.exe -O -P $Port $item.Local "${sshTarget}:$($item.Remote)"
     if ($LASTEXITCODE -ne 0) { throw "$($item.Description) upload failed." }
   }
 
-  $remoteCommand = "chmod 700 '$remoteApplier'; chmod 600 '$remoteProfile'; sudo /bin/sh '$remoteApplier' '$remoteProfile'; status=`$?; rm -f '$remoteApplier' '$remoteProfile'; exit `$status"
+  $detachedCommand = "umask 077; nohup /bin/sh '$remoteApplier' '$remoteProfile' '$remoteRenamer' '$remoteStatus' '$remoteLog' > '$remoteLog' 2>&1 & echo `\$! > '$remoteLog.pid'"
+  $remoteCommand = "chmod 700 '$remoteApplier'; chmod 700 '$remoteRenamer'; chmod 600 '$remoteProfile'; rm -f '$remoteStatus' '$remoteLog' '$remoteLog.pid'; sudo /bin/sh -c `"$detachedCommand`"; status=`$?; if [ `$status -eq 0 ]; then echo HY2_APPLY=started; fi; exit `$status"
   & ssh.exe -tt -p $Port $sshTarget $remoteCommand
   if ($LASTEXITCODE -ne 0) {
-    throw 'HY2 replacement failed. The preceding profile was restored if validation or the authenticated delay test failed.'
+    throw 'HY2 migration could not be started.'
+  }
+
+  $deadline = [DateTime]::UtcNow.AddSeconds($CompletionTimeoutSeconds)
+  $completed = $false
+  while ([DateTime]::UtcNow -lt $deadline) {
+    Start-Sleep -Seconds 2
+    $statusOutput = & ssh.exe -p $Port $sshTarget "if [ -f '$remoteStatus' ]; then cat '$remoteStatus'; else exit 3; fi" 2>&1
+    $statusCode = $LASTEXITCODE
+    if ($statusCode -eq 0 -and $statusOutput) {
+      $text = ($statusOutput | Out-String).Trim()
+      if ($text -match '(?m)^RESULT=(success|failed)$') {
+        Write-Output $text
+        $completed = $true
+        if ($text -match '(?m)^RESULT=success$') { break }
+        throw 'HY2 migration failed. The previous profile and configuration were restored.'
+      }
+    }
+  }
+  if (-not $completed) {
+    throw 'HY2 migration did not publish a completion state before the timeout. Do not rerun it; use the status diagnostic first.'
   }
 
   Write-Output 'RESULT=success'

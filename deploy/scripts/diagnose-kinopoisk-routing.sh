@@ -68,7 +68,7 @@ awk '
   /^  - / {
     payload = $0
     sub(/^  - /, "", payload)
-    if (payload ~ /^RULE-SET,(direct-custom|managed-direct|managed-wg-imp|managed-hy2-nl|managed-fallback),/ ||
+    if (payload ~ /^RULE-SET,(direct-custom|managed-direct|managed-wg-imp|managed-hy2-usa|managed-fallback),/ ||
         payload ~ /^GEOSITE,/ || payload ~ /^GEOIP,/ || payload ~ /^MATCH/) {
       printf "RULE_LINE_%d=%s\n", NR, payload
     }

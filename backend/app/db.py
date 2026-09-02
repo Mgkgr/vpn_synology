@@ -105,6 +105,34 @@ def _apply_additive_sqlite_migrations(engine: Engine) -> None:
                     "ix_dashboard_owners_singleton_marker_unique ON dashboard_owners (singleton_marker)"
                 )
             )
+        _migrate_hy2_reserve_name(connection)
+
+
+def _migrate_hy2_reserve_name(connection: Connection) -> None:
+    """Translate the retired reserve name before typed API responses read it."""
+
+    legacy = "HY2-NL"
+    current = "HY2-USA"
+    connection.execute(
+        text("UPDATE managed_rule_policies SET action = :current WHERE action = :legacy"),
+        {"current": current, "legacy": legacy},
+    )
+    connection.execute(
+        text("UPDATE probe_events SET target = :current WHERE target = :legacy"),
+        {"current": current, "legacy": legacy},
+    )
+    connection.execute(
+        text("UPDATE probe_events SET outbound = :current WHERE outbound = :legacy"),
+        {"current": current, "legacy": legacy},
+    )
+    connection.execute(
+        text("UPDATE route_events SET previous_outbound = :current WHERE previous_outbound = :legacy"),
+        {"current": current, "legacy": legacy},
+    )
+    connection.execute(
+        text("UPDATE route_events SET new_outbound = :current WHERE new_outbound = :legacy"),
+        {"current": current, "legacy": legacy},
+    )
 
 
 def _seed_probe_targets(engine: Engine) -> None:

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { api } from '../api/client'
-import type { RealtimeTrafficPeriod } from '../api/types'
+import type { ExitHealth, RealtimeTrafficPeriod } from '../api/types'
 import { AsyncState } from '../components/AsyncState'
 import { formatBytes, formatDate, formatRate, Status } from '../components/Status'
 import { TrafficChart } from '../components/TrafficChart'
@@ -44,6 +44,7 @@ export function OverviewPage() {
   const data = overview.data
   const traffic = realtimeTraffic.data?.points.at(-1) ?? null
   const selectedExit = data?.fallback.selected ?? null
+  const exitHealth = new Map((data?.exit_health ?? []).map((item) => [item.name, item]))
   const activeClients = (data?.clients ?? []).filter(isActiveWireGuardClient)
 
   return (
@@ -67,8 +68,8 @@ export function OverviewPage() {
           </AsyncState>
         </section>
         <section className="exit-rows" aria-label="Выходы fallback-группы">
-          <article className="exit-row primary"><div><p className="eyebrow">ВЫХОД</p><h2>Основной: WG-IMP</h2><p>{selectedExit === 'WG-IMP' ? 'выбран fallback-группой.' : 'не выбран fallback-группой.'}</p></div><Status ok={selectedExit === 'WG-IMP' ? true : null} pending={selectedExit !== 'WG-IMP'} /></article>
-          <article className="exit-row reserve"><div><p className="eyebrow">ВЫХОД</p><h2>Резервный: HY2-NL</h2><p>{selectedExit === 'HY2-NL' ? 'переключён на резерв' : 'не выбран fallback-группой.'}</p></div><Status ok={selectedExit === 'HY2-NL' ? true : null} pending={selectedExit !== 'HY2-NL'} /></article>
+          <ExitHealthCard name="WG-IMP" role="Основной" selected={selectedExit === 'WG-IMP'} health={exitHealth.get('WG-IMP')} />
+          <ExitHealthCard name="HY2-USA" role="Резервный" selected={selectedExit === 'HY2-USA'} health={exitHealth.get('HY2-USA')} />
         </section>
         <div className="overview-grid">
           <section className="panel traffic-panel" aria-labelledby="traffic-title">
@@ -98,6 +99,17 @@ export function OverviewPage() {
       </AsyncState>
     </main>
   )
+}
+
+function ExitHealthCard({ name, role, selected, health }: { name: ExitHealth['name']; role: string; selected: boolean; health?: ExitHealth }) {
+  const selection = selected ? (role === 'Резервный' ? 'переключён на резерв' : 'выбран fallback-группой.') : 'не выбран fallback-группой.'
+  const check = health && health.observed_at
+    ? `Проверка: ${health.succeeded_count} из ${health.total_count} · ${formatDate(health.observed_at)}`
+    : 'Проверка ещё не запускалась.'
+  return <article className={`exit-row ${role === 'Основной' ? 'primary' : 'reserve'}`}>
+    <div><p className="eyebrow">ВЫХОД</p><h2>{role}: {name}</h2><p>{selection}</p><p>{check}</p></div>
+    <Status ok={health?.succeeded ?? null} pending={health?.succeeded === null} />
+  </article>
 }
 
 function overviewGeoResult(update: { verification: string; changed_files: string[]; checked_files: string[] }): string {

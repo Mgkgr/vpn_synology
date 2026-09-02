@@ -149,12 +149,12 @@ POLICY_CATEGORIES: tuple[PolicyCategory, ...] = (
 )
 
 _CATEGORIES = {(item.kind, item.category): item for item in POLICY_CATEGORIES}
-POLICY_ACTIONS = ("DIRECT", "VPS-FALLBACK", "WG-IMP", "HY2-NL")
+POLICY_ACTIONS = ("DIRECT", "VPS-FALLBACK", "WG-IMP", "HY2-USA")
 _ACTION_FILES = {
     "DIRECT": "managed-direct.txt",
     "VPS-FALLBACK": "managed-fallback.txt",
     "WG-IMP": "managed-wg-imp.txt",
-    "HY2-NL": "managed-hy2-nl.txt",
+    "HY2-USA": "managed-hy2-usa.txt",
 }
 _LOCKS: dict[Path, threading.Lock] = {}
 _LOCKS_GUARD = threading.Lock()

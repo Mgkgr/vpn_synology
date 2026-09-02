@@ -212,7 +212,7 @@ class StubMihomo:
 
     async def groups(self) -> list[ProxyGroup]:
         selected = self.selections.pop(0) if self.selections else "WG-IMP"
-        return [ProxyGroup("VPS-FALLBACK", "fallback", ("WG-IMP", "HY2-NL"), selected)]
+        return [ProxyGroup("VPS-FALLBACK", "fallback", ("WG-IMP", "HY2-USA"), selected)]
 
     async def traffic(self) -> Traffic:
         return Traffic(up=1_500, down=2_500)
@@ -329,7 +329,7 @@ def test_probe_cycle_records_each_approved_endpoint_and_fallback_switch(tmp_path
     create_all(engine)
     factory = create_session_factory(engine)
     try:
-        mihomo = StubMihomo(["WG-IMP", "HY2-NL"])
+        mihomo = StubMihomo(["WG-IMP", "HY2-USA"])
         collector = make_collector(
             factory,
             wgeasy=StubWgEasy(ContractStatus(False, "not used")),
@@ -341,16 +341,16 @@ def test_probe_cycle_records_each_approved_endpoint_and_fallback_switch(tmp_path
         run(collector.run_probe_cycle())
 
         with factory() as session:
-            probes = session.scalars(select(ProbeEvent).where(ProbeEvent.target.in_(("WG-IMP", "HY2-NL")))).all()
+            probes = session.scalars(select(ProbeEvent).where(ProbeEvent.target.in_(("WG-IMP", "HY2-USA")))).all()
             routes = session.scalars(select(RouteEvent)).all()
         assert len(probes) == 12
         assert {(event.target, event.endpoint, event.succeeded, event.latency_ms) for event in probes} == {
             (target, endpoint, True, 37)
-            for target in ("WG-IMP", "HY2-NL")
+            for target in ("WG-IMP", "HY2-USA")
             for endpoint in Collector.DEFAULT_PROBE_URLS
         }
         assert [(event.route, event.previous_outbound, event.new_outbound) for event in routes] == [
-            ("VPS-FALLBACK", "WG-IMP", "HY2-NL")
+            ("VPS-FALLBACK", "WG-IMP", "HY2-USA")
         ]
         assert all("->" not in (event.detail or "") for event in routes)
     finally:
@@ -386,7 +386,7 @@ def test_minute_observations_record_two_exit_changes_before_the_next_probe_cycle
         collector = make_collector(
             factory,
             wgeasy=StubWgEasy(ContractStatus(False, "not used")),
-            mihomo=StubMihomo(["WG-IMP", "HY2-NL", "WG-IMP", "WG-IMP"]),
+            mihomo=StubMihomo(["WG-IMP", "HY2-USA", "WG-IMP", "WG-IMP"]),
             geodata_dir=tmp_path / "geodata",
         )
 
@@ -403,11 +403,11 @@ def test_minute_observations_record_two_exit_changes_before_the_next_probe_cycle
                 .order_by(ProbeEvent.id)
             ).all()
         assert [(event.previous_outbound, event.new_outbound) for event in routes] == [
-            ("WG-IMP", "HY2-NL"),
-            ("HY2-NL", "WG-IMP"),
+            ("WG-IMP", "HY2-USA"),
+            ("HY2-USA", "WG-IMP"),
         ]
-        assert [event.outbound for event in states] == ["WG-IMP", "HY2-NL", "WG-IMP", "WG-IMP"]
-        assert all(event.new_outbound in {"WG-IMP", "HY2-NL"} for event in routes)
+        assert [event.outbound for event in states] == ["WG-IMP", "HY2-USA", "WG-IMP", "WG-IMP"]
+        assert all(event.new_outbound in {"WG-IMP", "HY2-USA"} for event in routes)
     finally:
         engine.dispose()
 

@@ -31,6 +31,7 @@ export interface Overview {
   traffic: { up: number; down: number } | null
   services: ServiceStatus[]
   fallback: FallbackState
+  exit_health: ExitHealth[]
 }
 
 export interface HostContainer {
@@ -70,8 +71,16 @@ export interface ServiceStatus {
 
 export interface FallbackState {
   primary: 'WG-IMP'
-  reserve: 'HY2-NL'
-  selected: 'WG-IMP' | 'HY2-NL' | null
+  reserve: 'HY2-USA'
+  selected: 'WG-IMP' | 'HY2-USA' | null
+}
+
+export interface ExitHealth {
+  name: 'WG-IMP' | 'HY2-USA'
+  observed_at: string | null
+  succeeded: boolean | null
+  succeeded_count: number
+  total_count: number
 }
 
 export interface RouteGroup {
@@ -90,11 +99,11 @@ export interface RoutesResponse {
 
 export interface RouteProbe {
   observed_at: string
-  target: 'WG-IMP' | 'HY2-NL'
+  target: 'WG-IMP' | 'HY2-USA'
   succeeded: boolean
   latency_ms: number | null
   endpoint: string | null
-  outbound: 'WG-IMP' | 'HY2-NL' | null
+  outbound: 'WG-IMP' | 'HY2-USA' | null
   status: string | null
   status_code: number | null
   reason: string | null
@@ -104,8 +113,8 @@ export interface RouteSwitch {
   observed_at: string
   route: string
   action: string
-  previous_outbound: 'WG-IMP' | 'HY2-NL' | null
-  new_outbound: 'WG-IMP' | 'HY2-NL' | null
+  previous_outbound: 'WG-IMP' | 'HY2-USA' | null
+  new_outbound: 'WG-IMP' | 'HY2-USA' | null
 }
 
 export interface ProbeTarget {
@@ -139,7 +148,7 @@ export interface ProbeDiagnosticDns extends ProbeDiagnosticStep {
 
 export interface ProbeDiagnosis {
   observed_at: string
-  outbound: 'WG-IMP' | 'HY2-NL'
+  outbound: 'WG-IMP' | 'HY2-USA'
   endpoint: string
   conclusion: 'ok' | 'controller_unavailable' | 'dns_failure' | 'dns_no_address' | 'exit_failure'
   conclusion_text: string
@@ -167,7 +176,7 @@ export interface RulesResponse {
   policy_catalog?: ManagedRuleCategory[]
 }
 
-export type ManagedRuleAction = 'DIRECT' | 'VPS-FALLBACK' | 'WG-IMP' | 'HY2-NL'
+export type ManagedRuleAction = 'DIRECT' | 'VPS-FALLBACK' | 'WG-IMP' | 'HY2-USA'
 
 export interface ManagedRuleCategory {
   kind: 'GEOSITE' | 'GEOIP'

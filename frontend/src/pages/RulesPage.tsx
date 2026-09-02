@@ -13,9 +13,9 @@ function policyKey(kind: PolicyKind, category: string): string {
 }
 
 const routeActions: { value: ManagedRuleInput['action'], title: string, description: string }[] = [
-  { value: 'VPS-FALLBACK', title: 'Авто VPN', description: 'WG-IMP → HY2-NL' },
+  { value: 'VPS-FALLBACK', title: 'Авто VPN', description: 'WG-IMP → HY2-USA' },
   { value: 'WG-IMP', title: 'Только WG-IMP', description: 'основной выход' },
-  { value: 'HY2-NL', title: 'Только HY2-NL', description: 'резервный выход' },
+  { value: 'HY2-USA', title: 'Только HY2-USA', description: 'резервный выход' },
   { value: 'DIRECT', title: 'DIRECT', description: 'в обход VPN' },
 ]
 
@@ -72,6 +72,9 @@ function RouteActionPicker({ value, onChange }: { value: ManagedRuleInput['actio
 function CategoryPicker({ catalog, kind, category, onPick }: { catalog: PolicyCategory[], kind: PolicyKind, category: string, onPick: (item: PolicyCategory) => void }) {
   const geosite = catalog.filter((item) => item.kind === 'GEOSITE')
   const geoip = catalog.filter((item) => item.kind === 'GEOIP')
+  const effectiveCategory = catalog.some((item) => item.kind === kind && item.category === category)
+    ? category
+    : catalog.find((item) => item.kind === kind)?.category ?? ''
   // Same query key as RulesPage: React Query shares the request and cached data.
   const activePoliciesResponse = useQuery({ queryKey: ['rules'], queryFn: api.rules })
   const activePolicies = new Map((activePoliciesResponse.data?.policies ?? []).filter((item) => item.enabled).map((item) => [policyKey(item.kind, item.category), item]))
@@ -84,7 +87,7 @@ function CategoryPicker({ catalog, kind, category, onPick }: { catalog: PolicyCa
   const popular = geosite.filter((item) => !groupedGeoSiteCategories.has(item.category))
   const group = (title: string, description: string, items: PolicyCategory[]) => <div className="policy-category-group"><div><h3>{title}</h3><p>{description}</p></div><div className="policy-category-options">{items.map((item) => {
     const activePolicy = activePolicies.get(policyKey(item.kind, item.category))
-    const selected = kind === item.kind && category === item.category
+    const selected = kind === item.kind && effectiveCategory === item.category
     return <button type="button" className={`policy-category-option${activePolicy ? ' is-active' : ''}${selected ? ' selected' : ''}`} key={`${item.kind}-${item.category}`} aria-pressed={selected} data-policy-state={activePolicy ? 'active' : undefined} onClick={() => onPick(item)}><strong>{item.label}</strong><small>{item.description || (item.kind === 'GEOSITE' ? 'доменная категория' : 'сеть или страна')}</small>{activePolicy && <small className="policy-active-badge">{activePolicyCaption(activePolicy)}</small>}</button>
   })}</div></div>
   return <div className="policy-category-groups">

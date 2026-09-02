@@ -8,20 +8,20 @@ import { formatDate, Status } from '../components/Status'
 
 export interface RouteViewData {
   primary: 'WG-IMP'
-  reserve: 'HY2-NL'
-  selected: 'WG-IMP' | 'HY2-NL' | null
+  reserve: 'HY2-USA'
+  selected: 'WG-IMP' | 'HY2-USA' | null
   groupName: string
   probes: RouteProbe[]
   lastSwitch: RouteSwitch | null
 }
 
-export function routeFixture({ active = 'WG-IMP' }: { active?: 'WG-IMP' | 'HY2-NL' } = {}): RouteViewData {
-  return { primary: 'WG-IMP', reserve: 'HY2-NL', selected: active, groupName: 'AUTO', probes: [], lastSwitch: null }
+export function routeFixture({ active = 'WG-IMP' }: { active?: 'WG-IMP' | 'HY2-USA' } = {}): RouteViewData {
+  return { primary: 'WG-IMP', reserve: 'HY2-USA', selected: active, groupName: 'AUTO', probes: [], lastSwitch: null }
 }
 
 export function toRouteViewData(data: RoutesResponse): RouteViewData {
-  const group = data.groups.find((item) => item.choices.includes('WG-IMP') && item.choices.includes('HY2-NL'))
-  return { primary: 'WG-IMP', reserve: 'HY2-NL', selected: data.fallback.selected, groupName: group?.name ?? 'AUTO', probes: data.probes, lastSwitch: data.last_switch }
+  const group = data.groups.find((item) => item.choices.includes('WG-IMP') && item.choices.includes('HY2-USA'))
+  return { primary: 'WG-IMP', reserve: 'HY2-USA', selected: data.fallback.selected, groupName: group?.name ?? 'AUTO', probes: data.probes, lastSwitch: data.last_switch }
 }
 
 export function RoutesPage({ data }: { data?: RouteViewData }) {
@@ -38,7 +38,7 @@ export function RoutesPage({ data }: { data?: RouteViewData }) {
     onSuccess: () => setRunMessage('Проверка запущена. Результаты появятся в журнале после завершения.'),
   })
   const view = data ?? (query.data ? toRouteViewData(query.data) : undefined)
-  const [inspected, setInspected] = useState<'WG-IMP' | 'HY2-NL' | null>(null)
+  const [inspected, setInspected] = useState<'WG-IMP' | 'HY2-USA' | null>(null)
   const inspectedExit = inspected ?? view?.selected ?? 'WG-IMP'
 
   return (
@@ -94,7 +94,7 @@ function ProbeTargetSettings({ targets, pending, error, onChange, onTargetsChang
   </section>
 }
 
-function RouteMap({ data, inspected, onSelect, onRun, running, runMessage, runError, diagnosisTargets }: { data: RouteViewData; inspected: 'WG-IMP' | 'HY2-NL'; onSelect: (exit: 'WG-IMP' | 'HY2-NL') => void; onRun: () => void; running: boolean; runMessage: string | null; runError: Error | null; diagnosisTargets: ProbeTarget[] }) {
+function RouteMap({ data, inspected, onSelect, onRun, running, runMessage, runError, diagnosisTargets }: { data: RouteViewData; inspected: 'WG-IMP' | 'HY2-USA'; onSelect: (exit: 'WG-IMP' | 'HY2-USA') => void; onRun: () => void; running: boolean; runMessage: string | null; runError: Error | null; diagnosisTargets: ProbeTarget[] }) {
   const isReserveActive = data.selected === data.reserve
   const inspectedRole = inspected === data.primary ? 'Основной' : 'Резервный'
   const probes = data.probes.filter((probe) => probe.target === inspected)

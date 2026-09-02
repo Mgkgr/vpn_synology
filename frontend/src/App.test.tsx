@@ -32,8 +32,8 @@ describe('authenticated application routes', () => {
       if (String(input) === '/api/auth/csrf') return jsonResponse(authSession)
       if (String(input) === '/api/routes') {
         return jsonResponse({
-          groups: [{ name: 'AUTO', kind: 'Selector', choices: ['WG-IMP', 'HY2-NL'], selected: 'WG-IMP' }],
-          fallback: { primary: 'WG-IMP', reserve: 'HY2-NL', selected: 'WG-IMP' },
+          groups: [{ name: 'AUTO', kind: 'Selector', choices: ['WG-IMP', 'HY2-USA'], selected: 'WG-IMP' }],
+          fallback: { primary: 'WG-IMP', reserve: 'HY2-USA', selected: 'WG-IMP' },
           probes: [],
           last_switch: null,
         })

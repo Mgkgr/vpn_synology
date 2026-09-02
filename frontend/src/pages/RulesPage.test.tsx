@@ -167,7 +167,7 @@ describe('RulesPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Публичные торрент-трекеры/ }))
     expect(create).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Авто VPN WG-IMP → HY2-NL' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Авто VPN WG-IMP → HY2-USA' }))
     fireEvent.click(screen.getByRole('button', { name: 'Добавить правило' }))
 
     await waitFor(() => expect(create).toHaveBeenCalled())

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -26,7 +26,8 @@ describe('OverviewPage', () => {
       mihomo_version: null,
       traffic: null,
       services: [],
-      fallback: { primary: 'WG-IMP', reserve: 'HY2-NL', selected: 'WG-IMP' },
+      fallback: { primary: 'WG-IMP', reserve: 'HY2-USA', selected: 'WG-IMP' },
+      exit_health: [],
     })
     vi.spyOn(api, 'realtimeTraffic').mockResolvedValue({ period: '30m', sample_interval_seconds: 60, points: [] })
     vi.spyOn(api, 'updates').mockResolvedValue({ updates: [] })
@@ -55,7 +56,8 @@ describe('OverviewPage', () => {
       mihomo_version: null,
       traffic: null,
       services: [{ name: 'mihomo', observed_at: '2026-07-13T12:00:00Z', succeeded: false, latency_ms: null, status: 'unavailable', status_code: 503 }],
-      fallback: { primary: 'WG-IMP', reserve: 'HY2-NL', selected: 'HY2-NL' },
+      fallback: { primary: 'WG-IMP', reserve: 'HY2-USA', selected: 'HY2-USA' },
+      exit_health: [],
     })
     vi.spyOn(api, 'realtimeTraffic').mockResolvedValue({ period: '30m', sample_interval_seconds: 60, points: [] })
     vi.spyOn(api, 'updates').mockResolvedValue({ updates: [] })
@@ -88,5 +90,39 @@ describe('OverviewPage', () => {
     expect(await screen.findByText('Хост DS923+')).toBeVisible()
     expect(screen.getByText('vpn-dashboard')).toBeVisible()
     expect(screen.queryByText('MetaCubeXD')).not.toBeInTheDocument()
+  })
+
+  it('показывает последнюю проверку резерва, а не статус его выбора fallback-группой', async () => {
+    vi.spyOn(api, 'overview').mockResolvedValue({
+      client_count: 0,
+      clients: [],
+      mihomo_version: null,
+      traffic: null,
+      services: [],
+      fallback: { primary: 'WG-IMP', reserve: 'HY2-USA', selected: 'WG-IMP' },
+      exit_health: [
+        { name: 'WG-IMP', observed_at: '2026-09-02T07:00:00Z', succeeded: true, succeeded_count: 5, total_count: 5 },
+        { name: 'HY2-USA', observed_at: '2026-09-02T07:00:00Z', succeeded: false, succeeded_count: 0, total_count: 5 },
+      ],
+    })
+    vi.spyOn(api, 'realtimeTraffic').mockResolvedValue({ period: '30m', sample_interval_seconds: 60, points: [] })
+    vi.spyOn(api, 'updates').mockResolvedValue({ updates: [] })
+    vi.spyOn(api, 'journal').mockResolvedValue({ events: [], page: 1, page_size: 50, has_more: false })
+    vi.spyOn(api, 'hostHealth').mockResolvedValue({
+      observed_at: '2026-09-02T07:00:00Z', cpu_usage_percent: null, load_one: 0, load_five: 0, load_fifteen: 0,
+      memory_total_bytes: 0, memory_available_bytes: 0, swap_total_bytes: 0, swap_free_bytes: 0,
+      volume_total_bytes: 0, volume_available_bytes: 0, network_rx_errors: 0, network_rx_dropped: 0,
+      network_tx_errors: 0, network_tx_dropped: 0, containers: [],
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    render(<QueryClientProvider client={client}><OverviewPage /></QueryClientProvider>)
+
+    const title = await screen.findByRole('heading', { name: 'Резервный: HY2-USA' })
+    const reserve = title.closest('article')
+    expect(reserve).not.toBeNull()
+    expect(within(reserve!).getByText('недоступен')).toBeVisible()
+    expect(within(reserve!).getByText('не выбран fallback-группой.')).toBeVisible()
+    expect(within(reserve!).getByText(/^Проверка: 0 из 5/)).toBeVisible()
   })
 })

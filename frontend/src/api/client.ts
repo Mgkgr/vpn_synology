@@ -136,7 +136,7 @@ export const api = {
   }),
   deleteProbeTarget: (key: string) => request<void>(`/probes/targets/${encodeURIComponent(key)}`, { method: 'DELETE' }),
   runProbes: () => request<void>('/probes/run', { method: 'POST' }),
-  diagnoseProbe: (payload: { targetKey: string, outbound: 'WG-IMP' | 'HY2-NL' }) => request<ProbeDiagnosis>('/probes/diagnose', {
+  diagnoseProbe: (payload: { targetKey: string, outbound: 'WG-IMP' | 'HY2-USA' }) => request<ProbeDiagnosis>('/probes/diagnose', {
     method: 'POST',
     body: JSON.stringify({ target_key: payload.targetKey, outbound: payload.outbound }),
   }),

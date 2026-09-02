@@ -463,7 +463,7 @@ class Collector:
             outbound = selected[1] if selected is not None else None
             urls = self._current_probe_urls()
             events = await asyncio.gather(
-                *(self._probe_one(observed_at, target, endpoint, outbound) for target in ("WG-IMP", "HY2-NL") for endpoint in urls)
+                *(self._probe_one(observed_at, target, endpoint, outbound) for target in ("WG-IMP", "HY2-USA") for endpoint in urls)
             )
             self._record_probe_events(events)
             return True
@@ -957,8 +957,8 @@ def _is_selected_fallback(group: ProxyGroup) -> bool:
         group.type is not None
         and group.type.casefold() == "fallback"
         and group.now is not None
-        and group.now in {"WG-IMP", "HY2-NL"}
-        and {"WG-IMP", "HY2-NL"}.issubset(group.proxies)
+        and group.now in {"WG-IMP", "HY2-USA"}
+        and {"WG-IMP", "HY2-USA"}.issubset(group.proxies)
     )
 
 
