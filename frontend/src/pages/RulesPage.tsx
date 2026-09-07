@@ -54,6 +54,12 @@ function normalizedLines(value: string): string[] {
   return value.split('\n').map((line) => line.trim()).filter(Boolean)
 }
 
+function sameNormalizedLines(left: string, right: string): boolean {
+  const leftLines = normalizedLines(left)
+  const rightLines = normalizedLines(right)
+  return leftLines.length === rightLines.length && leftLines.every((line, index) => line === rightLines[index])
+}
+
 function RouteActions() {
   return <>{routeActions.map((item) => <option value={item.value} key={item.value}>{item.title} — {item.description}</option>)}</>
 }
@@ -131,13 +137,31 @@ export function RulesPage() {
   const [newAction, setNewAction] = useState<ManagedRuleInput['action']>('VPS-FALLBACK')
   const [geoPhase, setGeoPhase] = useState<'idle' | 'request' | 'verify'>('idle')
   const [policyNotice, setPolicyNotice] = useState<string | null>(null)
+  const [directNotice, setDirectNotice] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const rules = useQuery({ queryKey: ['rules'], queryFn: api.rules })
   const apply = useMutation({
     mutationFn: api.applyDirectRules,
+    onMutate: () => setDirectNotice(null),
     onSuccess: () => {
       setLoadedText(text)
       void queryClient.invalidateQueries({ queryKey: ['rules'] })
+    },
+    onError: async (_error, attemptedText) => {
+      // Mihomo may reload after writing the provider file, which can interrupt
+      // the browser request after the server has already committed the revision.
+      await new Promise((resolve) => window.setTimeout(resolve, 1200))
+      try {
+        await queryClient.invalidateQueries({ queryKey: ['rules'] })
+        const refreshed = await queryClient.fetchQuery({ queryKey: ['rules'], queryFn: api.rules })
+        if (sameNormalizedLines(refreshed.direct_text, attemptedText)) {
+          setLoadedText(refreshed.direct_text)
+          setText(refreshed.direct_text)
+          setDirectNotice('DIRECT-правила применены. Браузер потерял ответ при перезагрузке Mihomo, но состояние подтверждено.')
+        }
+      } catch {
+        // Keep the original mutation error when the confirming read also fails.
+      }
     },
   })
   const createPolicy = useMutation({
@@ -202,7 +226,7 @@ export function RulesPage() {
   return <main className="page"><header className="page-header"><div><p className="eyebrow">04 / ПРАВИЛА MIHOMO</p><h1>Правила</h1><p>Изменения DIRECT проходят предварительный просмотр до применения.</p>{rules.isLoading && <p className="loading-hint" role="status">Загружаем GeoSite, GeoIP и правила Mihomo…</p>}</div><div><button className="primary-button" type="button" onClick={() => upgradeGeo.mutate()} disabled={upgradeGeo.isPending}>{geoPhase === 'request' ? 'Отправляем запрос Mihomo…' : geoPhase === 'verify' ? 'Проверяем GeoSite / GeoIP…' : 'Обновить GeoSite / GeoIP'}</button>{upgradeGeo.isPending && <p className="loading-hint" role="status">{geoPhase === 'verify' ? 'Mihomo ответил, сверяем файлы GeoData на шлюзе…' : 'Запускаем обновление GeoData в Mihomo…'}</p>}{upgradeGeo.error && <p className="form-error" role="alert">{upgradeGeo.error.message}</p>}{upgradeGeo.isSuccess && <p className="success-message">{geoUpdateSummary(upgradeGeo.data)}</p>}</div></header>
     <section className="panel policy-panel" aria-labelledby="policy-title"><div className="section-heading"><div><h2 id="policy-title">Маршрутизация GeoSite / GeoIP</h2><span>Выберите направление, назначьте ему маршрут и добавьте правило.</span></div></div><div className="policy-composer"><section className="policy-step" aria-labelledby="policy-category-title"><div className="policy-step-heading"><span>1</span><div><h3 id="policy-category-title">Куда направлять</h3><p>Готовые направления из активных списков MetaCubeX.</p></div></div><CategoryPicker catalog={policyCatalog} kind={newKind} category={newCategory} onPick={(item) => { setNewKind(item.kind); setNewCategory(item.category) }} /></section><section className="policy-step" aria-labelledby="policy-action-title"><div className="policy-step-heading"><span>2</span><div><h3 id="policy-action-title">Как направлять</h3><p>Выберите автоматический VPN, конкретный выход или DIRECT.</p></div></div><RouteActionPicker value={newAction} onChange={setNewAction} /></section><div className="policy-advanced"><label>Расширенный выбор <select aria-label="Тип нового правила" value={newKind} onChange={(event) => setNewKind(event.target.value as PolicyKind)}><option value="GEOSITE">GeoSite</option><option value="GEOIP">GeoIP</option></select><select aria-label="Категория нового правила" value={newCategory} onChange={(event) => setNewCategory(event.target.value)}>{newCategoryOptions.map((item) => <option value={item.category} key={`${item.kind}-${item.category}`}>{item.label}</option>)}</select></label><button className="primary-button" type="button" disabled={!newCategory || createPolicy.isPending} onClick={() => createPolicy.mutate({ kind: newKind, category: newCategory, action: newAction, enabled: true })}>{createPolicy.isPending ? 'Добавление…' : 'Добавить правило'}</button></div></div>{policyNotice && <p className="success-message" role="status">{policyNotice}</p>}{createPolicy.error && !policyNotice && <p className="form-error policy-error" role="alert">{createPolicy.error.message}</p>}<div className="policy-table-wrap"><AsyncState loading={rules.isLoading} error={rules.error} empty={!(rules.data?.policies?.length)} emptyLabel="Категорий пока нет. Добавьте нужный маршрут выше."><table className="data-table"><thead><tr><th>Категория</th><th>Маршрут</th><th>Активно</th><th><span className="sr-only">Действия</span></th></tr></thead><tbody>{(rules.data?.policies ?? []).map((policy) => <PolicyRow key={policy.id} policy={policy} catalog={policyCatalog} pending={updatePolicy.isPending || deletePolicy.isPending} onSave={(id, payload) => updatePolicy.mutate({ id, payload })} onDelete={(id) => deletePolicy.mutate(id)} />)}</tbody></table></AsyncState></div></section>
     <div className="rules-layout">
-      <section className="panel editor-panel" aria-labelledby="direct-title"><div className="section-heading"><h2 id="direct-title">Свой DIRECT-список</h2><span>по одному правилу в строке</span></div><label className="sr-only" htmlFor="direct-rules">Правила DIRECT</label><textarea id="direct-rules" value={text} onChange={(event) => setText(event.target.value)} placeholder="DOMAIN-SUFFIX,example.local,DIRECT\nIP-CIDR,192.168.0.0/16,DIRECT" disabled={loadedText === null} /><div className="diff-grid"><div><h3>Добавится</h3>{additions.length ? <ul>{additions.map((line) => <li key={line}>+ {line}</li>)}</ul> : <p>Нет изменений.</p>}</div><div><h3>Будет удалено</h3>{removals.length ? <ul>{removals.map((line) => <li key={line}>− {line}</li>)}</ul> : <p>Нет изменений.</p>}</div></div>{apply.error && <p className="form-error" role="alert">{apply.error.message}</p>}{apply.data && <p className="success-message">Применена ревизия #{apply.data.revision_number}.</p>}<button className="primary-button" type="button" disabled={!canApply} onClick={() => apply.mutate(text)}>{apply.isPending ? 'Применение…' : 'Применить DIRECT-правила'}</button></section>
+      <section className="panel editor-panel" aria-labelledby="direct-title"><div className="section-heading"><h2 id="direct-title">Свой DIRECT-список</h2><span>по одному правилу в строке</span></div><label className="sr-only" htmlFor="direct-rules">Правила DIRECT</label><textarea id="direct-rules" value={text} onChange={(event) => setText(event.target.value)} placeholder="DOMAIN-SUFFIX,example.local,DIRECT\nIP-CIDR,192.168.0.0/16,DIRECT" disabled={loadedText === null} /><div className="diff-grid"><div><h3>Добавится</h3>{additions.length ? <ul>{additions.map((line) => <li key={line}>+ {line}</li>)}</ul> : <p>Нет изменений.</p>}</div><div><h3>Будет удалено</h3>{removals.length ? <ul>{removals.map((line) => <li key={line}>− {line}</li>)}</ul> : <p>Нет изменений.</p>}</div></div>{directNotice && <p className="success-message" role="status">{directNotice}</p>}{apply.error && !directNotice && <p className="form-error" role="alert">{apply.error.message}</p>}{apply.data && <p className="success-message">Применена ревизия #{apply.data.revision_number}.</p>}<button className="primary-button" type="button" disabled={!canApply} onClick={() => apply.mutate(text)}>{apply.isPending ? 'Применение…' : 'Применить DIRECT-правила'}</button></section>
       <section className="panel" aria-labelledby="providers-title"><div className="section-heading"><h2 id="providers-title">Rule providers</h2><span>активные источники</span></div><AsyncState loading={rules.isLoading} error={rules.error} empty={!rules.data?.providers.length} emptyLabel="Провайдеры не вернули данных.">{rules.data && <table className="data-table"><thead><tr><th>Имя</th><th>Поведение</th></tr></thead><tbody>{rules.data.providers.map((provider) => <tr key={provider.name}><th scope="row">{provider.name}</th><td>{provider.behavior}</td></tr>)}</tbody></table>}</AsyncState></section>
     </div>
     <section className="panel" aria-labelledby="active-rules-title"><div className="section-heading"><h2 id="active-rules-title">Активные правила контроллера</h2><span>только фактически загруженные строки</span></div><AsyncState loading={rules.isLoading} error={rules.error} empty={!rules.data?.rules.length} emptyLabel="Контроллер не вернул правил.">{rules.data && <table className="data-table"><thead><tr><th>Тип</th><th>Payload</th><th>Выход</th></tr></thead><tbody>{rules.data.rules.map((rule, index) => <tr key={`${rule.type}-${rule.payload}-${index}`}><td>{rule.type}</td><th scope="row">{rule.payload}</th><td>{rule.proxy}</td></tr>)}</tbody></table>}</AsyncState></section>

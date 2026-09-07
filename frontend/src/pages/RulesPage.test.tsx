@@ -63,6 +63,33 @@ describe('RulesPage', () => {
     expect(screen.queryByText('Failed to fetch')).not.toBeInTheDocument()
   })
 
+  it('подтверждает применённый DIRECT-список после потери браузером ответа на reload Mihomo', async () => {
+    let rulesCalls = 0
+    vi.spyOn(api, 'rules').mockImplementation(async () => {
+      rulesCalls += 1
+      return {
+        rules: [],
+        providers: [],
+        direct_text: rulesCalls > 1 ? 'DOMAIN-SUFFIX,azk59.permkrai.ru,DIRECT\n' : '',
+        policy_catalog: [],
+        policies: [],
+      }
+    })
+    vi.spyOn(api, 'applyDirectRules').mockRejectedValue(new TypeError('Failed to fetch'))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    render(<QueryClientProvider client={client}><RulesPage /></QueryClientProvider>)
+
+    const editor = await screen.findByLabelText('Правила DIRECT')
+    await waitFor(() => expect(editor).toBeEnabled())
+    fireEvent.change(editor, { target: { value: 'DOMAIN-SUFFIX,azk59.permkrai.ru,DIRECT\n' } })
+    await waitFor(() => expect(screen.getByText('+ DOMAIN-SUFFIX,azk59.permkrai.ru,DIRECT')).toBeVisible())
+    fireEvent.click(screen.getByRole('button', { name: 'Применить DIRECT-правила' }))
+
+    expect(await screen.findByText('DIRECT-правила применены. Браузер потерял ответ при перезагрузке Mihomo, но состояние подтверждено.', {}, { timeout: 3_000 })).toBeVisible()
+    expect(screen.queryByText('Failed to fetch')).not.toBeInTheDocument()
+  })
+
   it('ждёт точный загруженный DIRECT-файл и не применяет неизменённый текст', async () => {
     let resolveRules: ((value: Awaited<ReturnType<typeof api.rules>>) => void) | undefined
     vi.spyOn(api, 'rules').mockReturnValue(new Promise((resolve) => { resolveRules = resolve }))
