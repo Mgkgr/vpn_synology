@@ -105,6 +105,12 @@ def _apply_additive_sqlite_migrations(engine: Engine) -> None:
                     "ix_dashboard_owners_singleton_marker_unique ON dashboard_owners (singleton_marker)"
                 )
             )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_probe_events_target_observed_at ON probe_events (target, observed_at)"
+            )
+        )
         _migrate_hy2_reserve_name(connection)
 
 

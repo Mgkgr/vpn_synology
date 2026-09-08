@@ -81,6 +81,8 @@ export interface ExitHealth {
   succeeded: boolean | null
   succeeded_count: number
   total_count: number
+  last_success_at: string | null
+  unavailable_since: string | null
 }
 
 export interface RouteGroup {

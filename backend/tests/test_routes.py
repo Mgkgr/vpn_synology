@@ -510,6 +510,8 @@ def test_overview_reports_each_exit_last_independent_probe_cycle(route_parts) ->
             "succeeded": False,
             "succeeded_count": 1,
             "total_count": 2,
+            "last_success_at": None,
+            "unavailable_since": "2026-07-13T12:00:00Z",
         },
         {
             "name": "HY2-USA",
@@ -517,6 +519,8 @@ def test_overview_reports_each_exit_last_independent_probe_cycle(route_parts) ->
             "succeeded": False,
             "succeeded_count": 1,
             "total_count": 2,
+            "last_success_at": "2026-07-13T11:00:00Z",
+            "unavailable_since": "2026-07-13T12:00:00Z",
         },
     ]
     assert "private" not in response.text

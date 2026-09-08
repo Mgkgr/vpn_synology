@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -90,5 +90,33 @@ describe('ClientsPage', () => {
     await waitFor(() => expect(clients).toHaveBeenCalledTimes(2))
     expect(queryClient.getMutationCache().getAll()).toEqual([])
     expect(screen.queryByLabelText('Пароль wg-easy')).not.toBeInTheDocument()
+  })
+
+  it('отличает подключённый профиль от неактивного, не подключавшегося и отключённого', async () => {
+    const now = Date.now()
+    vi.spyOn(api, 'clients').mockResolvedValue([
+      { ...client, id: 1, name: 'active', latest_handshake_at: new Date(now - 2 * 60_000).toISOString() },
+      { ...client, id: 2, name: 'stale', latest_handshake_at: new Date(now - 20 * 60_000).toISOString() },
+      { ...client, id: 3, name: 'never', latest_handshake_at: null },
+      { ...client, id: 4, name: 'disabled', enabled: false, latest_handshake_at: new Date(now - 2 * 60_000).toISOString() },
+    ])
+    vi.spyOn(api, 'trafficUsage').mockResolvedValue({ period: 'month', usage: [] })
+    vi.spyOn(api, 'wgeasyCredentialStatus').mockResolvedValue({ configured: true })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    render(<QueryClientProvider client={queryClient}><ClientsPage /></QueryClientProvider>)
+
+    const active = (await screen.findByText('active')).closest('tr')
+    const stale = screen.getByText('stale').closest('tr')
+    const never = screen.getByText('never').closest('tr')
+    const disabled = screen.getByText('disabled').closest('tr')
+    expect(active).not.toBeNull()
+    expect(stale).not.toBeNull()
+    expect(never).not.toBeNull()
+    expect(disabled).not.toBeNull()
+    expect(within(active!).getByText('подключён')).toBeVisible()
+    expect(within(stale!).getByText(/неактивен · 20 мин/)).toBeVisible()
+    expect(within(never!).getByText('не подключался')).toBeVisible()
+    expect(within(disabled!).getByText('отключён')).toBeVisible()
   })
 })

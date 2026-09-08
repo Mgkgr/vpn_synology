@@ -151,6 +151,8 @@ class ExitHealthResponse(BaseModel):
     succeeded: bool | None
     succeeded_count: int = Field(ge=0)
     total_count: int = Field(ge=0)
+    last_success_at: datetime | None
+    unavailable_since: datetime | None
 
 
 class RouteGroupResponse(BaseModel):

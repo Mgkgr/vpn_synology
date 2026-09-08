@@ -20,3 +20,14 @@ export function formatDate(value: string | null): string {
   const date = new Date(value)
   return Number.isNaN(date.valueOf()) ? value : new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(date)
 }
+
+export function formatElapsed(value: string | null | undefined, now = Date.now()): string {
+  if (!value) return 'нет данных'
+  const observedAt = Date.parse(value)
+  if (!Number.isFinite(observedAt)) return 'нет данных'
+  const seconds = Math.max(0, Math.floor((now - observedAt) / 1_000))
+  if (seconds < 60) return 'меньше минуты'
+  if (seconds < 3_600) return `${Math.floor(seconds / 60)} мин`
+  if (seconds < 86_400) return `${Math.floor(seconds / 3_600)} ч`
+  return `${Math.floor(seconds / 86_400)} д`
+}

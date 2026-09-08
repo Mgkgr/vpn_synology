@@ -25,7 +25,17 @@ try {
   & scp -O -P $Port $archive "${sshTarget}:$remoteArchive"
   if ($LASTEXITCODE -ne 0) { throw 'Source upload failed.' }
   & ssh -p $Port $sshTarget "mkdir -p '$ProjectDir' && tar -xf '$remoteArchive' -C '$ProjectDir' && rm -f '$remoteArchive'"
-  if ($LASTEXITCODE -ne 0) { throw 'Source extraction failed.' }
+  if ($LASTEXITCODE -ne 0) {
+    # DSM may reset the SSH channel after tar has already completed. Verify on
+    # a fresh connection that tar removed its source archive and the deployed
+    # project has its required runtime script before continuing.
+    $verification = & ssh -T -p $Port $sshTarget "test ! -e '$remoteArchive' && test -f '$ProjectDir/deploy/scripts/prepare-runtime.sh' && printf SOURCE_EXTRACTION=verified || printf SOURCE_EXTRACTION=unverified"
+    $verified = $LASTEXITCODE -eq 0 -and (($verification | ForEach-Object { $_.ToString().Trim() }) -contains 'SOURCE_EXTRACTION=verified')
+    if (-not $verified) { throw 'Source extraction failed.' }
+    Write-Output 'SOURCE_EXTRACTION=verified_after_ssh_reset'
+  } else {
+    Write-Output 'SOURCE_EXTRACTION=ready'
+  }
 } finally {
   Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
 }

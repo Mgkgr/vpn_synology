@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.auth import (
@@ -1209,27 +1209,61 @@ def _load_exit_health(runtime: RuntimeContainer) -> list[ExitHealthResponse]:
     exactly the observations that belong to the same result.
     """
 
-    with runtime.session_factory() as session:
-        rows = session.scalars(
-            select(ProbeEvent)
-            .where(ProbeEvent.target.in_(_FALLBACK_OUTBOUNDS))
-            .order_by(ProbeEvent.observed_at.desc(), ProbeEvent.id.desc())
-            .limit(500)
-        ).all()
-
     health: list[ExitHealthResponse] = []
-    for outbound in ("WG-IMP", "HY2-USA"):
-        latest = next((row.observed_at for row in rows if row.target == outbound), None)
-        cycle = [row for row in rows if row.target == outbound and row.observed_at == latest] if latest is not None else []
-        health.append(
-            ExitHealthResponse(
-                name=outbound,
-                observed_at=latest,
-                succeeded=all(row.succeeded for row in cycle) if cycle else None,
-                succeeded_count=sum(1 for row in cycle if row.succeeded),
-                total_count=len(cycle),
+    with runtime.session_factory() as session:
+        for outbound in ("WG-IMP", "HY2-USA"):
+            succeeded = case((ProbeEvent.succeeded.is_(True), 1), else_=0)
+            cycles = (
+                select(
+                    ProbeEvent.observed_at.label("observed_at"),
+                    func.min(succeeded).label("succeeded"),
+                    func.sum(succeeded).label("succeeded_count"),
+                    func.count(ProbeEvent.id).label("total_count"),
+                )
+                .where(ProbeEvent.target == outbound)
+                .group_by(ProbeEvent.observed_at)
+                .subquery()
             )
-        )
+            latest = session.execute(
+                select(cycles).order_by(cycles.c.observed_at.desc()).limit(1)
+            ).mappings().first()
+            if latest is None:
+                health.append(
+                    ExitHealthResponse(
+                        name=outbound,
+                        observed_at=None,
+                        succeeded=None,
+                        succeeded_count=0,
+                        total_count=0,
+                        last_success_at=None,
+                        unavailable_since=None,
+                    )
+                )
+                continue
+
+            last_success_at = session.scalar(
+                select(func.max(cycles.c.observed_at)).where(cycles.c.succeeded == 1)
+            )
+            is_healthy = bool(latest["succeeded"])
+            unavailable_since = None
+            if not is_healthy:
+                unavailable_since = session.scalar(
+                    select(func.min(cycles.c.observed_at)).where(
+                        cycles.c.observed_at > last_success_at
+                    )
+                ) if last_success_at is not None else session.scalar(select(func.min(cycles.c.observed_at)))
+
+            health.append(
+                ExitHealthResponse(
+                    name=outbound,
+                    observed_at=latest["observed_at"],
+                    succeeded=is_healthy,
+                    succeeded_count=int(latest["succeeded_count"]),
+                    total_count=int(latest["total_count"]),
+                    last_success_at=last_success_at,
+                    unavailable_since=unavailable_since,
+                )
+            )
     return health
 
 

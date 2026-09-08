@@ -118,6 +118,7 @@ class GatewayTrafficSample(Base):
 
 class ProbeEvent(Base):
     __tablename__ = "probe_events"
+    __table_args__ = (Index("ix_probe_events_target_observed_at", "target", "observed_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     observed_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)

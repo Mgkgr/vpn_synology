@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import type { ExitHealth, RealtimeTrafficPeriod } from '../api/types'
 import { AsyncState } from '../components/AsyncState'
-import { formatBytes, formatDate, formatRate, Status } from '../components/Status'
+import { formatBytes, formatDate, formatElapsed, formatRate, Status } from '../components/Status'
 import { TrafficChart } from '../components/TrafficChart'
 
 const ACTIVE_HANDSHAKE_WINDOW_MS = 5 * 60_000
@@ -106,10 +106,22 @@ function ExitHealthCard({ name, role, selected, health }: { name: ExitHealth['na
   const check = health && health.observed_at
     ? `Проверка: ${health.succeeded_count} из ${health.total_count} · ${formatDate(health.observed_at)}`
     : 'Проверка ещё не запускалась.'
+  const availability = exitAvailabilityText(health)
   return <article className={`exit-row ${role === 'Основной' ? 'primary' : 'reserve'}`}>
-    <div><p className="eyebrow">ВЫХОД</p><h2>{role}: {name}</h2><p>{selection}</p><p>{check}</p></div>
+    <div><p className="eyebrow">ВЫХОД</p><h2>{role}: {name}</h2><p>{selection}</p><p>{check}</p>{availability && <p>{availability}</p>}</div>
     <Status ok={health?.succeeded ?? null} pending={health?.succeeded === null} />
   </article>
+}
+
+function exitAvailabilityText(health: ExitHealth | undefined): string | null {
+  if (!health?.observed_at || health.succeeded === null) return null
+  if (health.succeeded) {
+    const lastSuccess = health.last_success_at ?? health.observed_at
+    return `Последний успешный цикл: ${formatElapsed(lastSuccess)} назад · ${formatDate(lastSuccess)}.`
+  }
+  const unavailableSince = health.unavailable_since ?? health.observed_at
+  if (health.last_success_at) return `Недоступен уже ${formatElapsed(unavailableSince)} · с ${formatDate(unavailableSince)}.`
+  return `Нет успешных проверок за доступную историю · наблюдается с ${formatDate(unavailableSince)}.`
 }
 
 function overviewGeoResult(update: { verification: string; changed_files: string[]; checked_files: string[] }): string {
