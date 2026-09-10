@@ -67,6 +67,13 @@ if ($result -ne 'SUCCESS') {
   throw "Deployment did not complete successfully (SSH exit code: $deployExitCode); the prior dashboard container was started when available."
 }
 & ssh -t -p $Port $sshTarget "sudo /usr/local/sbin/vpn-dashboard-status"
-if ($LASTEXITCODE -ne 0) { throw 'Deployment completed, but post-deployment status check failed.' }
+if ($LASTEXITCODE -ne 0) {
+  # The deploy status marker is already SUCCESS here. DSM can still reset the
+  # interactive channel while the final informational status command returns.
+  # Confirm it on one fresh non-interactive connection before reporting failure.
+  & ssh -T -p $Port $sshTarget "sudo /usr/local/sbin/vpn-dashboard-status"
+  if ($LASTEXITCODE -ne 0) { throw 'Deployment completed, but post-deployment status check failed.' }
+  Write-Output 'POST_DEPLOY_STATUS=verified_after_ssh_reset'
+}
 
 Write-Output 'RESULT=success'
