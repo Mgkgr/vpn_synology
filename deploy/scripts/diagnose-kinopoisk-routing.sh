@@ -18,9 +18,20 @@ case "$WATCH_SECONDS" in
   ''|*[!0-9]*) echo 'watch duration must be an integer number of seconds' >&2; exit 1 ;;
 esac
 [ "$WATCH_SECONDS" -le 60 ] || { echo 'watch duration must not exceed 60 seconds' >&2; exit 1; }
-case "$SOURCE_ADDRESS" in
-  ''|*[!0-9.]*|.*|*.) echo 'source address must be an IPv4 address when set' >&2; exit 1 ;;
-esac
+is_ipv4() {
+  printf '%s\n' "$1" | awk -F. '
+    NF != 4 { exit 1 }
+    {
+      for (part = 1; part <= 4; part++) {
+        if ($part !~ /^[0-9]+$/ || $part ~ /^0[0-9]+$/ || ($part + 0) > 255) exit 1
+      }
+    }
+  '
+}
+if [ -n "$SOURCE_ADDRESS" ] && ! is_ipv4 "$SOURCE_ADDRESS"; then
+  echo 'source address must be an IPv4 address when set' >&2
+  exit 1
+fi
 
 echo 'RESULT=success'
 echo 'KINOPOISK_DIAGNOSTIC=read_only'

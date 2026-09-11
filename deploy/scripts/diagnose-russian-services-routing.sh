@@ -1,7 +1,7 @@
 #!/bin/sh
-# Read-only route evidence for Ozon, Avito and Yandex services.  It reports
-# active policy rows, rendered provider placement and live Mihomo connections;
-# it never changes rules, exits, credentials or client configuration.
+# Read-only route evidence for Russian marketplaces and delivery services. It
+# reports active policy rows, rendered provider placement and live Mihomo
+# connections; it never changes rules, exits, credentials or client settings.
 set -eu
 
 DOCKER_BIN=${DOCKER_BIN:-/usr/local/bin/docker}
@@ -11,7 +11,7 @@ RULES_DIR=${RULES_DIR:-$GATEWAY_DIR/mihomo/rules}
 DASHBOARD_CONTAINER=${DASHBOARD_CONTAINER:-vpn-dashboard}
 WATCH_SECONDS=${1:-0}
 SOURCE_ADDRESS=${2:-}
-SELECTORS='ozon avito yandex category-ecommerce-ru category-retail-ru'
+SELECTORS='ozon wildberries avito yandex category-ecommerce-ru category-retail-ru'
 
 [ "$(id -u)" = 0 ] || { echo 'must run as root' >&2; exit 1; }
 [ -x "$DOCKER_BIN" ] || { echo "Docker binary is unavailable: $DOCKER_BIN" >&2; exit 1; }
@@ -20,9 +20,20 @@ case "$WATCH_SECONDS" in
   ''|*[!0-9]*) echo 'watch duration must be an integer number of seconds' >&2; exit 1 ;;
 esac
 [ "$WATCH_SECONDS" -le 60 ] || { echo 'watch duration must not exceed 60 seconds' >&2; exit 1; }
-case "$SOURCE_ADDRESS" in
-  ''|*[!0-9.]*|.*|*.) echo 'source address must be an IPv4 address when set' >&2; exit 1 ;;
-esac
+is_ipv4() {
+  printf '%s\n' "$1" | awk -F. '
+    NF != 4 { exit 1 }
+    {
+      for (part = 1; part <= 4; part++) {
+        if ($part !~ /^[0-9]+$/ || $part ~ /^0[0-9]+$/ || ($part + 0) > 255) exit 1
+      }
+    }
+  '
+}
+if [ -n "$SOURCE_ADDRESS" ] && ! is_ipv4 "$SOURCE_ADDRESS"; then
+  echo 'source address must be an IPv4 address when set' >&2
+  exit 1
+fi
 
 echo 'RESULT=success'
 echo 'RUSSIAN_SERVICES_DIAGNOSTIC=read_only'
@@ -31,7 +42,7 @@ echo 'POLICY_ROWS=begin'
 "$DOCKER_BIN" exec -i "$DASHBOARD_CONTAINER" python - <<'PY'
 import sqlite3
 
-selectors = ('ozon', 'avito', 'yandex', 'category-ecommerce-ru', 'category-retail-ru')
+selectors = ('ozon', 'wildberries', 'avito', 'yandex', 'category-ecommerce-ru', 'category-retail-ru')
 connection = sqlite3.connect('/data/dashboard.sqlite3')
 placeholders = ','.join('?' for _ in selectors)
 rows = connection.execute(
@@ -112,9 +123,30 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 SERVICE_MARKERS = {
-    'Ozon': ('ozon.ru', 'ozon.com', 'ozon.kz', 'ozon.by', 'ozonusercontent.com', 'o3.ru', 'o3t.ru', 'ocourier.ru'),
+    # Keep the narrower Yandex services first: a delivery connection should
+    # not be hidden in the broad Yandex group in the diagnostic output.
+    'Yandex-food': (
+        'eda.yandex.ru', 'lavka.yandex.ru', 'dostavka.yandex.ru',
+        'delivery.yandex.ru', 'market.yandex.ru', 'go.yandex',
+    ),
+    'Samokat': ('samokat.ru',),
+    'Kuper': ('kuper.ru', 'sbermarket.ru'),
+    'Delivery Club': ('delivery-club.ru', 'dclub.ru'),
+    'Ozon': (
+        'ozon.ru', 'ozon.app', 'ozon.com', 'ozon.kz', 'ozon.by',
+        'ozonusercontent.com', 'o3.ru', 'o3t.ru', 'o3team.ru',
+        'o-courier.ru', 'ocourier.ru',
+    ),
+    'Wildberries': (
+        'wildberries.ru', 'wb.ru', 'wbstatic.net', 'wbcontent.net',
+        'wbbasket.ru', 'wb-basket.ru', 'rwb.ru',
+    ),
     'Avito': ('avito.ru', 'avito.st'),
-    'Yandex': ('yandex', 'ya.ru', 'ya.cc', 'yandexgo.com', 'yango.com', 'yango.taxi', 'yastatic.net', 'yccdn.ru', 'yndx.net', 'clstorage.net'),
+    'Yandex': (
+        'yandex.ru', 'yandex.net', 'yandexcloud.net', 'yandex.com',
+        'yandexgo.com', 'yango.com', 'yango.taxi', 'ya.ru', 'ya.cc',
+        'yastatic.net', 'yccdn.ru', 'yndx.net', 'clstorage.net',
+    ),
 }
 
 url = os.environ.get('MIHOMO_URL', 'http://vpn-wireguard:9091').rstrip('/') + '/connections'
@@ -192,7 +224,7 @@ else:
     if watch_seconds:
         baseline = {str(item.get('id', '')) for item in initial if isinstance(item, dict)}
         observed = set()
-        print(f'WATCH_READY=open Ozon, Avito and a Yandex delivery page now; seconds={watch_seconds}')
+        print(f'WATCH_READY=open one affected marketplace or delivery app now; seconds={watch_seconds}')
         deadline = time.monotonic() + watch_seconds
         while time.monotonic() < deadline and len(observed) < 80:
             time.sleep(1)

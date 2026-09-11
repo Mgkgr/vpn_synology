@@ -7,6 +7,7 @@ from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 NORMALIZER = REPOSITORY / "deploy" / "scripts" / "normalize-direct-import.py"
+RUSSIAN_COMMERCE_PACK = REPOSITORY / "deploy" / "rules" / "russian-commerce-delivery-direct.txt"
 
 
 def normalize(source: str, tmp_path: Path) -> tuple[subprocess.CompletedProcess[str], str]:
@@ -49,3 +50,25 @@ def test_rejects_non_direct_or_invalid_import_rows_without_writing_output(tmp_pa
     assert result.returncode == 2
     assert "line 1 is not an importable DIRECT rule" in result.stderr
     assert text == ""
+
+
+def test_russian_commerce_and_delivery_pack_keeps_critical_mobile_service_roots(tmp_path: Path) -> None:
+    """A pack regression must not silently send the affected mobile apps back to VPN."""
+
+    result, text = normalize(RUSSIAN_COMMERCE_PACK.read_text(encoding="utf-8"), tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    rules = set(text.splitlines())
+    assert {
+        "DOMAIN-SUFFIX,ozon.ru,DIRECT",
+        "DOMAIN-SUFFIX,ozonusercontent.com,DIRECT",
+        "DOMAIN-SUFFIX,wildberries.ru,DIRECT",
+        "DOMAIN-SUFFIX,wbstatic.net,DIRECT",
+        "DOMAIN-SUFFIX,avito.ru,DIRECT",
+        "DOMAIN-SUFFIX,samokat.ru,DIRECT",
+        "DOMAIN-SUFFIX,eda.yandex.ru,DIRECT",
+        "DOMAIN-SUFFIX,lavka.yandex.ru,DIRECT",
+        "DOMAIN-SUFFIX,yandex.ru,DIRECT",
+    } <= rules
+    assert len(rules) == 41
+    assert "NORMALIZED_RULES=41" in result.stdout

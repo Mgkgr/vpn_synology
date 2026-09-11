@@ -103,8 +103,14 @@ POLICY_CATEGORIES: tuple[PolicyCategory, ...] = (
     # from individual services, so an administrator can make a narrow DIRECT
     # rule for a bank or marketplace instead of routing all Russian domains.
     PolicyCategory("GEOSITE", "category-bank-ru", "Банки и финансы РФ"),
-    PolicyCategory("GEOSITE", "category-ecommerce-ru", "Маркетплейсы РФ"),
-    PolicyCategory("GEOSITE", "category-retail-ru", "Ритейл и доставка РФ"),
+    PolicyCategory(
+        "GEOSITE", "category-ecommerce-ru", "Маркетплейсы РФ",
+        "Широкий набор маркетплейсов. Для Ozon, Wildberries и Авито точные категории ниже обычно безопаснее.",
+    ),
+    PolicyCategory(
+        "GEOSITE", "category-retail-ru", "Ритейл и доставка РФ",
+        "Широкий набор магазинов и доставки. Самокат и новые API приложений могут потребовать отдельного DOMAIN-SUFFIX правила.",
+    ),
     PolicyCategory("GEOSITE", "category-gov-ru", "Госуслуги и ведомства РФ"),
     PolicyCategory("GEOSITE", "category-entertainment-ru", "Видео и развлечения РФ"),
     PolicyCategory("GEOSITE", "kinopoisk", "Кинопоиск"),
@@ -112,12 +118,24 @@ POLICY_CATEGORIES: tuple[PolicyCategory, ...] = (
     PolicyCategory("GEOSITE", "category-travel-ru", "Путешествия и билеты РФ"),
     PolicyCategory("GEOSITE", "category-medicine-ru", "Медицина и аптеки РФ"),
     PolicyCategory("GEOSITE", "category-ru", "Все сайты РФ — широкое правило"),
-    PolicyCategory("GEOSITE", "ozon", "Ozon"),
-    PolicyCategory("GEOSITE", "wildberries", "Wildberries"),
-    PolicyCategory("GEOSITE", "avito", "Авито"),
+    PolicyCategory(
+        "GEOSITE", "ozon", "Ozon",
+        "Точный набор GeoSite: магазин, API, доставка и известные служебные домены Ozon.",
+    ),
+    PolicyCategory(
+        "GEOSITE", "wildberries", "Wildberries",
+        "Точный набор GeoSite: Wildberries, WB, статический контент и платёжная инфраструктура.",
+    ),
+    PolicyCategory(
+        "GEOSITE", "avito", "Авито",
+        "Точный набор GeoSite для avito.ru и avito.st.",
+    ),
     PolicyCategory("GEOSITE", "sber", "СберБанк"),
     PolicyCategory("GEOSITE", "tbank-ru", "Т-Банк / Росбанк"),
-    PolicyCategory("GEOSITE", "yandex", "Яндекс"),
+    PolicyCategory(
+        "GEOSITE", "yandex", "Яндекс",
+        "Широкий набор Яндекса, включая Еду, Лавку, Go, авторизацию и общую инфраструктуру. Для DIRECT влияет на все сервисы Яндекса.",
+    ),
     PolicyCategory("GEOSITE", "vk", "VK"),
     PolicyCategory("GEOSITE", "mailru-group", "Mail.ru Group"),
     PolicyCategory("GEOSITE", "cdek", "СДЭК"),
