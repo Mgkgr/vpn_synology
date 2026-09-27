@@ -18,6 +18,9 @@ from app.auth import AuthService, LoginThrottle
 from app.collectors import Collector, register_collector_jobs
 from app.db import create_all, create_session_factory, create_sqlite_engine
 from app.mihomo import MihomoClient
+from app.health_collector import HealthCollector, register_health_jobs
+from app.outbound_health import HealthService
+from app.outbounds import build_outbound_registry
 from app.policy_rules import ManagedRuleService
 from app.probe_targets import ProbeTargetService
 from app.routes import RuntimeContainer, build_api_router
@@ -38,6 +41,7 @@ class CollectorRuntime:
     scheduler: Any
     close: Callable[[], None] | None = None
     container: RuntimeContainer | None = None
+    health_collector: HealthCollector | None = None
 
 
 def create_collector_runtime(settings: Settings | None = None) -> CollectorRuntime:
@@ -90,7 +94,10 @@ def create_collector_runtime(settings: Settings | None = None) -> CollectorRunti
         trusted_proxy_networks=tuple(ip_network(item) for item in settings.trusted_proxy_cidrs),
         max_request_body_bytes=settings.max_request_body_bytes,
     )
-    return CollectorRuntime(collector, AsyncIOScheduler(timezone="UTC"), engine.dispose, container)
+    health_collector = None
+    if settings.outbound_health_enabled:
+        health_collector = HealthCollector(mihomo, HealthService(session_factory, build_outbound_registry(settings.antidpi_engine)))
+    return CollectorRuntime(collector, AsyncIOScheduler(timezone="UTC"), engine.dispose, container, health_collector)
 
 
 def create_app(
@@ -130,6 +137,7 @@ def create_app(
                     # a safe audit event explaining the deferred default.
                     pass
         register_collector_jobs(runtime.scheduler, runtime.collector)
+        register_health_jobs(runtime.scheduler, runtime.health_collector)
         runtime.scheduler.start()
         app.state.collector = runtime.collector
         try:

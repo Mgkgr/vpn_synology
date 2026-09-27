@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 import json
 from typing import Literal
@@ -23,6 +23,14 @@ REASON_CODES = frozenset({
 
 
 @dataclass(frozen=True)
+class ControlCheck:
+    endpoint_key: Literal["cloudflare", "google", "github"]
+    succeeded: bool | None
+    latency_ms: int | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
 class ControlCycle:
     outbound: OutboundId
     cycle_id: str
@@ -31,6 +39,7 @@ class ControlCycle:
     successes: int
     selected_fallback: FallbackOutboundId | None
     reasons: tuple[str, ...]
+    checks: tuple[ControlCheck, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -85,6 +94,17 @@ class HealthService:
             or any(reason not in REASON_CODES for reason in cycle.reasons)
         ):
             raise ValueError("invalid control observation")
+        if cycle.checks and (
+            len(cycle.checks) != 3
+            or {check.endpoint_key for check in cycle.checks} != {"cloudflare", "google", "github"}
+            or any(
+                check.succeeded not in (True, False, None)
+                or (check.reason is not None and check.reason not in REASON_CODES)
+                or (check.latency_ms is not None and (type(check.latency_ms) is not int or not 0 <= check.latency_ms <= 60_000))
+                for check in cycle.checks
+            )
+        ):
+            raise ValueError("invalid control check metadata")
 
         # Serialize before reading the state: deduplication and transition commit
         # together, including two processes sharing the same WAL database.
@@ -149,6 +169,7 @@ class HealthService:
                 outbound=cycle.outbound, cycle_id=cycle_id, completed_at=completed,
                 result=result, successes=cycle.successes, selected_fallback=cycle.selected_fallback,
                 reasons_json=state.reasons_json,
+                checks_json=json.dumps([asdict(check) for check in cycle.checks]),
             ))
             session.flush()
             return self._snapshot(state, cycle.outbound)

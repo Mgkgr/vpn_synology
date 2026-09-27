@@ -7,12 +7,20 @@ import ipaddress
 import json
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 import httpx
 
 from app.settings import DELAY_TEST_HOST_ALLOWLIST
+
+
+CONTROL_ENDPOINTS = {
+    "cloudflare": "https://cp.cloudflare.com/generate_204",
+    "google": "https://www.google.com/generate_204",
+    "github": "https://api.github.com/",
+}
+CONTROL_PROBE_NAMES = frozenset({"DASH-HEALTH-WG-IMP", "DASH-HEALTH-HY2-USA", "DASH-HEALTH-ANTIDPI"})
 
 
 class MihomoIntegrationError(RuntimeError):
@@ -279,6 +287,22 @@ class MihomoClient:
         except (TypeError, ValueError) as error:
             raise self._invalid_payload("proxy_delay") from error
 
+    async def control_delay(self, probe_name: str, endpoint_key: Literal["cloudflare", "google", "github"]) -> ProxyDelay:
+        """Internal probes never accept user URLs or touch a working proxy's /delay."""
+        if probe_name not in CONTROL_PROBE_NAMES or endpoint_key not in CONTROL_ENDPOINTS:
+            raise MihomoIntegrationError("control_delay", "invalid control target")
+        payload = await self._json(
+            "control_delay", "GET", f"proxies/{quote(probe_name, safe='')}/delay",
+            params={"url": CONTROL_ENDPOINTS[endpoint_key], "timeout": "10000"}, timeout=12.0,
+        )
+        try:
+            delay = _nonnegative_int(payload.get("delay"))
+            if delay == 0:
+                raise ValueError
+            return ProxyDelay(delay)
+        except (TypeError, ValueError) as error:
+            raise self._invalid_payload("control_delay") from error
+
     async def dns_lookup(self, url: str) -> DnsLookup:
         """Resolve one approved probe hostname through Mihomo DNS.
 
@@ -321,8 +345,9 @@ class MihomoClient:
         path: str,
         *,
         params: Mapping[str, str] | None = None,
+        timeout: float | None = None,
     ) -> Mapping[str, Any]:
-        response = await self._request(operation, method, path, params=params)
+        response = await self._request(operation, method, path, params=params, timeout=timeout)
         try:
             payload = response.json()
         except (TypeError, ValueError) as error:
@@ -339,13 +364,15 @@ class MihomoClient:
         *,
         params: Mapping[str, str] | None = None,
         json_body: Mapping[str, str] | None = None,
+        timeout: float | None = None,
     ) -> httpx.Response:
         try:
             async with httpx.AsyncClient(
                 base_url=self._base_url,
-                timeout=self._timeout,
+                timeout=self._timeout if timeout is None else timeout,
                 transport=self._transport,
                 follow_redirects=False,
+                trust_env=False,
             ) as client:
                 response = await client.request(method, path, params=params, json=json_body, headers=self._headers())
         except httpx.TimeoutException as error:

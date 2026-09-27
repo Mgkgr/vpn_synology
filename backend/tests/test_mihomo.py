@@ -58,6 +58,25 @@ def run(awaitable: Any) -> Any:
     return asyncio.run(awaitable)
 
 
+def test_control_delay_has_fixed_internal_targets_and_timeout():
+    requests = []
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(200, json={"delay": 57})
+    client = MihomoClient("http://mihomo:9090", transport=httpx.MockTransport(handle), delay_test_host_supplier=lambda: ())
+    assert run(client.control_delay("DASH-HEALTH-WG-IMP", "cloudflare")).delay_ms == 57
+    request = requests[0]
+    assert request.method == "GET"
+    assert request.url.path == "/proxies/DASH-HEALTH-WG-IMP/delay"
+    assert request.url.params["url"] == "https://cp.cloudflare.com/generate_204"
+    assert request.url.params["timeout"] == "10000"
+    assert request.extensions["timeout"]["read"] == 12
+    for name, key in (("WG-IMP", "google"), ("DASH-HEALTH-WG-IMP", "http://127.0.0.1")):
+        with pytest.raises(MihomoIntegrationError):
+            run(client.control_delay(name, key))
+    assert len(requests) == 1
+
+
 class FirstSampleOnlyStream(httpx.AsyncByteStream):
     async def __aiter__(self):
         yield b'{"up": 15, "down": 24}\n'

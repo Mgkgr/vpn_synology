@@ -307,6 +307,7 @@ class OutboundControlCycle(Base):
     successes: Mapped[int] = mapped_column(Integer, nullable=False)
     selected_fallback: Mapped[str | None] = mapped_column(String(32))
     reasons_json: Mapped[str] = mapped_column(Text, nullable=False)
+    checks_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
 
 
 class OutboundHealthState(Base):

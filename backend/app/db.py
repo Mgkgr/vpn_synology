@@ -49,6 +49,7 @@ def create_all(engine: Engine) -> None:
 
 
 _SQLITE_ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
+    "outbound_control_cycles": {"checks_json": "TEXT NOT NULL DEFAULT '[]'"},
     "peer_snapshots": {"latest_handshake_at": "VARCHAR(32)"},
     "probe_events": {
         "endpoint": "VARCHAR(255)",
