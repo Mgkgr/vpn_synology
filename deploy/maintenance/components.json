@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "components": [
+    {"id":"mihomo","compose_project":"vpn-gateway","services":["mihomo"],"repository":"MetaCubeX/mihomo","source_kind":"github","dependencies":["wireguard"]},
+    {"id":"wireguard","compose_project":"vpn-gateway","services":["wireguard"],"repository":"wg-easy/wg-easy","source_kind":"github","dependencies":[]},
+    {"id":"uptime-kuma","compose_project":"vpn-gateway","services":["uptime-kuma"],"repository":"louislam/uptime-kuma","source_kind":"github","dependencies":[]},
+    {"id":"metacubexd","compose_project":"vpn-gateway","services":["metacubexd"],"repository":"MetaCubeX/metacubexd","source_kind":"github","dependencies":[]},
+    {"id":"dashboard","compose_project":"vpn-dashboard","services":["dashboard"],"repository":null,"source_kind":"local","dependencies":[]},
+    {"id":"antidpi","compose_project":"vpn-antidpi","services":["antidpi","socks"],"repository":null,"source_kind":"disabled","dependencies":[]}
+  ]
+}
