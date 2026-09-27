@@ -1,0 +1,8 @@
+VPN Gateway — {{ name }}
+{% if heartbeatJSON.msg contains 'INCIDENT_DOWN' %}Подтверждён длительный отказ выхода.
+{{ heartbeatJSON.msg }}{% elsif heartbeatJSON.msg contains 'INCIDENT_RECOVERED' %}Выход восстановлен: две последовательные успешные проверки.
+{{ heartbeatJSON.msg }}{% elsif heartbeatJSON.msg contains 'MONITORING_UNKNOWN' %}Нет достоверных данных мониторинга. Это не новый подтверждённый отказ VPN.
+{% if heartbeatJSON.msg contains 'first_failed_at=' %}Ранее подтверждённый инцидент остаётся открытым.
+{{ heartbeatJSON.msg }}{% endif %}{% elsif heartbeatJSON.status == 1 %}Наблюдение доступно. Это сообщение само по себе не означает восстановление VPN.
+{% else %}Нет heartbeat мониторинга. Состояние выхода неизвестно; проверьте панель и Kuma.
+{% endif %}

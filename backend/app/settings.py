@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     max_request_body_bytes: int = 65_536
     outbound_health_enabled: bool = False
     antidpi_engine: AntidpiEngine | None = None
+    kuma_push_tokens_file: Path | None = None
 
     @field_validator("dashboard_bind")
     @classmethod

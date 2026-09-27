@@ -19,6 +19,7 @@ from app.collectors import Collector, register_collector_jobs
 from app.db import create_all, create_session_factory, create_sqlite_engine
 from app.mihomo import MihomoClient
 from app.health_collector import HealthCollector, register_health_jobs
+from app.kuma_push import KumaPublisher, KumaPushClient, load_push_tokens, register_kuma_jobs
 from app.outbound_health import HealthService
 from app.outbounds import build_outbound_registry
 from app.policy_rules import ManagedRuleService
@@ -42,6 +43,7 @@ class CollectorRuntime:
     close: Callable[[], None] | None = None
     container: RuntimeContainer | None = None
     health_collector: HealthCollector | None = None
+    kuma_publisher: KumaPublisher | None = None
 
 
 def create_collector_runtime(settings: Settings | None = None) -> CollectorRuntime:
@@ -95,9 +97,12 @@ def create_collector_runtime(settings: Settings | None = None) -> CollectorRunti
         max_request_body_bytes=settings.max_request_body_bytes,
     )
     health_collector = None
+    publisher = None
     if settings.outbound_health_enabled:
         health_collector = HealthCollector(mihomo, HealthService(session_factory, build_outbound_registry(settings.antidpi_engine)))
-    return CollectorRuntime(collector, AsyncIOScheduler(timezone="UTC"), engine.dispose, container, health_collector)
+        tokens, token_error = load_push_tokens(settings.kuma_push_tokens_file, tuple(entry.id for entry in health_collector.service.registry))
+        publisher = KumaPublisher(session_factory, health_collector.service, KumaPushClient(str(settings.kuma_url)), tokens, token_error)
+    return CollectorRuntime(collector, AsyncIOScheduler(timezone="UTC"), engine.dispose, container, health_collector, publisher)
 
 
 def create_app(
@@ -138,6 +143,7 @@ def create_app(
                     pass
         register_collector_jobs(runtime.scheduler, runtime.collector)
         register_health_jobs(runtime.scheduler, runtime.health_collector)
+        register_kuma_jobs(runtime.scheduler, runtime.kuma_publisher)
         runtime.scheduler.start()
         app.state.collector = runtime.collector
         try:

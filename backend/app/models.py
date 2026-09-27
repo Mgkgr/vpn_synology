@@ -325,3 +325,18 @@ class OutboundHealthState(Base):
     successes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     selected_fallback: Mapped[str | None] = mapped_column(String(32))
     reasons_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+
+
+class NotificationDeliveryState(Base):
+    """Bounded coalescing state. Acceptance by Kuma is not Telegram delivery."""
+
+    __tablename__ = "notification_delivery_states"
+
+    monitor_key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+    last_accepted_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+    pending_revision: Mapped[str | None] = mapped_column(String(64))
+    accepted_revision: Mapped[str | None] = mapped_column(String(64))
+    last_error_code: Mapped[str | None] = mapped_column(String(32))
+    failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
