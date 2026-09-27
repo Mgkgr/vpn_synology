@@ -276,3 +276,51 @@ class GeoFileMetadata(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     modified_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class OutboundIncident(Base):
+    """One confirmed outage; start/recovery also serve as durable journal events."""
+
+    __tablename__ = "outbound_incidents"
+    __table_args__ = (Index("ix_outbound_incidents_outbound_confirmed", "outbound", "confirmed_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    outbound: Mapped[str] = mapped_column(String(32), nullable=False)
+    first_failed_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    confirmed_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    recovered_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+
+
+class OutboundControlCycle(Base):
+    __tablename__ = "outbound_control_cycles"
+    __table_args__ = (
+        UniqueConstraint("outbound", "cycle_id", name="uq_outbound_control_cycle"),
+        CheckConstraint("successes >= 0 AND successes <= 3", name="ck_control_successes"),
+        Index("ix_outbound_control_completed", "completed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    outbound: Mapped[str] = mapped_column(String(32), nullable=False)
+    cycle_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    completed_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    result: Mapped[str] = mapped_column(String(16), nullable=False)
+    successes: Mapped[int] = mapped_column(Integer, nullable=False)
+    selected_fallback: Mapped[str | None] = mapped_column(String(32))
+    reasons_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class OutboundHealthState(Base):
+    __tablename__ = "outbound_health_states"
+
+    outbound: Mapped[str] = mapped_column(String(32), primary_key=True)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    observed_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+    pending_since: Mapped[datetime | None] = mapped_column(UtcDateTime())
+    incident_id: Mapped[int | None] = mapped_column(ForeignKey("outbound_incidents.id"))
+    incident_started_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+    recovery_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_success_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+    last_cycle_id: Mapped[str | None] = mapped_column(String(32))
+    successes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    selected_fallback: Mapped[str | None] = mapped_column(String(32))
+    reasons_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
