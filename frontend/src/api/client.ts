@@ -6,6 +6,7 @@ import type {
   JournalFilters,
   JournalResponse,
   Overview,
+  OutboundHealthResponse,
   Period,
   RealtimeTrafficPeriod,
   RealtimeTrafficResponse,
@@ -98,6 +99,7 @@ export const api = {
     csrfToken = null
   },
   overview: () => request<Overview>('/overview'),
+  outboundHealth: () => request<OutboundHealthResponse>('/health/outbounds'),
   hostHealth: () => request<HostHealth>('/host-health'),
   routes: () => request<RoutesResponse>('/routes'),
   clients: () => request<Client[]>('/clients'),

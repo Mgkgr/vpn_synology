@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { api } from '../api/client'
+import { outboundLabel } from '../api/outboundLabels'
 import type { ExitHealth, RealtimeTrafficPeriod } from '../api/types'
 import { AsyncState } from '../components/AsyncState'
 import { formatBytes, formatDate, formatElapsed, formatRate, Status } from '../components/Status'
 import { TrafficChart } from '../components/TrafficChart'
+import { OutboundHealthPanel, useOutboundHealth } from '../components/OutboundHealthPanel'
 
 const ACTIVE_HANDSHAKE_WINDOW_MS = 5 * 60_000
 
@@ -20,6 +22,7 @@ type OverviewClient = {
 }
 
 export function OverviewPage() {
+  const health = useOutboundHealth()
   const [trafficPeriod, setTrafficPeriod] = useState<RealtimeTrafficPeriod>('30m')
   const overview = useQuery({
     queryKey: ['overview'],
@@ -51,8 +54,9 @@ export function OverviewPage() {
     <main className="page overview-page">
       <header className="page-header">
         <div><p className="eyebrow">01 / СОСТОЯНИЕ СИСТЕМЫ</p><h1>Обзор</h1><p>Оперативная сводка защищённого шлюза.</p></div>
-        <div className="header-status"><Status ok={selectedExit ? true : null} pending={!selectedExit} /><span>{selectedExit ? `выбран ${selectedExit}` : 'нет данных о выходе'}</span></div>
+        <div className="header-status"><span>{selectedExit ? `выбран ${outboundLabel(selectedExit)}` : 'нет данных о выходе'}</span></div>
       </header>
+      <OutboundHealthPanel data={health.data} isLoading={health.isLoading} error={health.error} />
       <AsyncState loading={overview.isLoading} error={overview.error}>
         <section className="services-section" aria-labelledby="services-title">
           <div className="section-heading"><h2 id="services-title">Сервисы</h2><span>проверка доступности</span></div>
@@ -67,10 +71,10 @@ export function OverviewPage() {
             </div>}
           </AsyncState>
         </section>
-        <section className="exit-rows" aria-label="Выходы fallback-группы">
+        {!health.data?.enabled && <section className="exit-rows" aria-label="Выходы fallback-группы">
           <ExitHealthCard name="WG-IMP" role="Основной" selected={selectedExit === 'WG-IMP'} health={exitHealth.get('WG-IMP')} />
           <ExitHealthCard name="HY2-USA" role="Резервный" selected={selectedExit === 'HY2-USA'} health={exitHealth.get('HY2-USA')} />
-        </section>
+        </section>}
         <div className="overview-grid">
           <section className="panel traffic-panel" aria-labelledby="traffic-title">
             <div className="section-heading"><div><h2 id="traffic-title">Трафик</h2><span>{traffic ? `скорость канала · получено ${formatDate(traffic.observed_at)}` : 'скорость канала · сбор раз в минуту'}</span></div><div className="period-toggle" role="group" aria-label="Период графика скорости"><button className={trafficPeriod === '5m' ? 'active' : ''} onClick={() => setTrafficPeriod('5m')} type="button">5 минут</button><button className={trafficPeriod === '30m' ? 'active' : ''} onClick={() => setTrafficPeriod('30m')} type="button">30 минут</button><button className={trafficPeriod === '6h' ? 'active' : ''} onClick={() => setTrafficPeriod('6h')} type="button">6 часов</button></div></div>
@@ -108,7 +112,7 @@ function ExitHealthCard({ name, role, selected, health }: { name: ExitHealth['na
     : 'Проверка ещё не запускалась.'
   const availability = exitAvailabilityText(health)
   return <article className={`exit-row ${role === 'Основной' ? 'primary' : 'reserve'}`}>
-    <div><p className="eyebrow">ВЫХОД</p><h2>{role}: {name}</h2><p>{selection}</p><p>{check}</p>{availability && <p>{availability}</p>}</div>
+    <div><p className="eyebrow">ВЫХОД</p><h2>{role}: {outboundLabel(name)}</h2><p>{selection}</p><p>{check}</p>{availability && <p>{availability}</p>}</div>
     <Status ok={health?.succeeded ?? null} pending={health?.succeeded === null} />
   </article>
 }

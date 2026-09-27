@@ -43,6 +43,8 @@ describe('OverviewPage', () => {
     render(<QueryClientProvider client={client}><OverviewPage /></QueryClientProvider>)
 
     expect(await screen.findByText('online-client')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Основной: VLESS-NL' })).toBeVisible()
+    expect(screen.getByText('выбран VLESS-NL')).toBeVisible()
     expect(screen.getByText('Активно: 1 из 3 · handshake ≤ 5 мин')).toBeVisible()
     expect(screen.getByText('подключён')).toBeVisible()
     expect(screen.queryByText('stale-client')).not.toBeInTheDocument()
@@ -118,7 +120,7 @@ describe('OverviewPage', () => {
 
     render(<QueryClientProvider client={client}><OverviewPage /></QueryClientProvider>)
 
-    const title = await screen.findByRole('heading', { name: 'Резервный: HY2-USA' })
+    const title = await screen.findByRole('heading', { name: 'Резервный: HY2-DE' })
     const reserve = title.closest('article')
     expect(reserve).not.toBeNull()
     expect(within(reserve!).getByText('недоступен')).toBeVisible()
@@ -153,7 +155,7 @@ describe('OverviewPage', () => {
 
     render(<QueryClientProvider client={client}><OverviewPage /></QueryClientProvider>)
 
-    const title = await screen.findByRole('heading', { name: 'Резервный: HY2-USA' })
+    const title = await screen.findByRole('heading', { name: 'Резервный: HY2-DE' })
     const reserve = title.closest('article')
     expect(reserve).not.toBeNull()
     expect(within(reserve!).getByText(/Недоступен уже 10 мин/)).toBeVisible()

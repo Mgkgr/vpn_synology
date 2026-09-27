@@ -2,9 +2,11 @@ import { FormEvent, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '../api/client'
+import { outboundLabel } from '../api/outboundLabels'
 import type { ProbeDiagnosis, ProbeTarget, RouteProbe, RoutesResponse, RouteSwitch } from '../api/types'
 import { AsyncState } from '../components/AsyncState'
-import { formatDate, Status } from '../components/Status'
+import { formatDate } from '../components/Status'
+import { OutboundHealthPanel, useOutboundHealth } from '../components/OutboundHealthPanel'
 
 export interface RouteViewData {
   primary: 'WG-IMP'
@@ -25,6 +27,7 @@ export function toRouteViewData(data: RoutesResponse): RouteViewData {
 }
 
 export function RoutesPage({ data }: { data?: RouteViewData }) {
+  const health = useOutboundHealth(data === undefined)
   const query = useQuery({ queryKey: ['routes'], queryFn: api.routes, enabled: data === undefined })
   const probeTargets = useQuery({ queryKey: ['probe-targets'], queryFn: api.probeTargets, enabled: data === undefined })
   const queryClient = useQueryClient()
@@ -45,8 +48,9 @@ export function RoutesPage({ data }: { data?: RouteViewData }) {
     <main className="page routes-page">
       <header className="page-header">
         <div><p className="eyebrow">02 / ТОПОЛОГИЯ</p><h1>Маршруты</h1><p>Основной и резервный выходы fallback-группы показаны отдельными ветками.</p></div>
-        <div className="header-status"><Status ok={view?.selected ? true : null} pending={!view?.selected} /><span>Группа {view?.groupName ?? '…'}</span></div>
+        <div className="header-status"><span>{view?.selected ? `выбран ${outboundLabel(view.selected)}` : 'выбор неизвестен'}</span><span>Группа {view?.groupName ?? '…'}</span></div>
       </header>
+      {data === undefined && <OutboundHealthPanel data={health.data} isLoading={health.isLoading} error={health.error} />}
       <AsyncState loading={query.isLoading} error={query.error} empty={!view} emptyLabel="Маршруты пока не получены.">
         {view && <>
           <RouteMap data={view} inspected={inspectedExit} onSelect={setInspected} onRun={() => { setRunMessage(null); runProbes.mutate() }} running={runProbes.isPending} runMessage={runMessage} runError={runProbes.error} diagnosisTargets={probeTargets.data ?? []} />
@@ -106,18 +110,18 @@ function RouteMap({ data, inspected, onSelect, onRun, running, runMessage, runEr
   const diagnosticTarget = availableTargets.find((item) => item.key === diagnosticTargetKey) ?? availableTargets[0]
   return <div className="route-layout">
     <section className="route-map-panel" aria-labelledby="route-map-title">
-      <div className="section-heading"><h2 id="route-map-title">Путь трафика</h2><span>сейчас: {data.selected ?? 'нет данных'}</span></div>
-      <div className="route-role-summary" aria-label="Роли выходов"><span>Основной: {data.primary}</span><span>Резервный: {data.reserve}</span>{isReserveActive && <span>переключён на резерв</span>}</div>
-      <div className="route-map" role="group" aria-label="Ветки маршрутизации"><svg className="route-lines" viewBox="0 0 760 260" preserveAspectRatio="none" aria-hidden="true"><path d="M 160 130 H 360" /><path d="M 360 130 C 430 130 430 65 540 65" /><path className="reserve-line" d="M 360 130 C 430 130 430 195 540 195" /></svg><div className="route-node client-node"><strong>WireGuard</strong><span>клиенты</span></div><div className="route-node mihomo-node"><strong>Mihomo</strong><span>fallback-группа</span></div><button type="button" className={`route-node exit-node primary ${inspected === data.primary ? 'selected' : ''}`} onClick={() => onSelect(data.primary)}><span className="branch-key">ОСНОВНОЙ</span><strong>{data.primary}</strong><span>{data.selected === data.primary ? 'активный выход' : 'готов к работе'}</span></button><button type="button" className={`route-node exit-node reserve ${inspected === data.reserve ? 'selected' : ''}`} onClick={() => onSelect(data.reserve)}><span className="branch-key">РЕЗЕРВ</span><strong>{data.reserve}</strong><span>{isReserveActive ? 'активный резерв' : 'только при отказе'}</span></button></div>
+      <div className="section-heading"><h2 id="route-map-title">Путь трафика</h2><span>сейчас: {outboundLabel(data.selected, 'нет данных')}</span></div>
+      <div className="route-role-summary" aria-label="Роли выходов"><span>Основной: {outboundLabel(data.primary)}</span><span>Резервный: {outboundLabel(data.reserve)}</span>{isReserveActive && <span>переключён на резерв</span>}</div>
+      <div className="route-map" role="group" aria-label="Ветки маршрутизации"><svg className="route-lines" viewBox="0 0 760 260" preserveAspectRatio="none" aria-hidden="true"><path d="M 160 130 H 360" /><path d="M 360 130 C 430 130 430 65 540 65" /><path className="reserve-line" d="M 360 130 C 430 130 430 195 540 195" /></svg><div className="route-node client-node"><strong>WireGuard</strong><span>клиенты</span></div><div className="route-node mihomo-node"><strong>Mihomo</strong><span>fallback-группа</span></div><button type="button" className={`route-node exit-node primary ${inspected === data.primary ? 'selected' : ''}`} onClick={() => onSelect(data.primary)}><span className="branch-key">ОСНОВНОЙ</span><strong>{outboundLabel(data.primary)}</strong><span>{data.selected === data.primary ? 'выбран группой' : 'не выбран группой'}</span></button><button type="button" className={`route-node exit-node reserve ${inspected === data.reserve ? 'selected' : ''}`} onClick={() => onSelect(data.reserve)}><span className="branch-key">РЕЗЕРВ</span><strong>{outboundLabel(data.reserve)}</strong><span>{isReserveActive ? 'выбран группой' : 'не выбран группой'}</span></button></div>
       <div className="route-legend" aria-label="Легенда"><span><i className="solid-line" />Основная ветка</span><span><i className="dotted-line" />Резервная ветка</span></div>
     </section>
-    <aside className="inspector" aria-labelledby="inspector-title"><p className="eyebrow">ИНСПЕКТОР ВЫХОДА</p><h2 id="inspector-title">{inspected}</h2><dl className="metric-list"><div><dt>Роль</dt><dd>{inspectedRole}</dd></div><div><dt>Последняя смена</dt><dd>{data.lastSwitch ? formatDate(data.lastSwitch.observed_at) : 'нет данных'}</dd></div><div><dt>Текущее состояние</dt><dd>{data.selected === inspected ? 'выбран fallback-группой' : 'не выбран fallback-группой'}</dd></div></dl><div className="probe-run"><button type="button" onClick={onRun} disabled={running}>{running ? 'Запуск…' : 'Проверить сейчас'}</button>{runMessage && <p role="status">{runMessage}</p>}{runError && <p className="form-error" role="alert">{runError.message}</p>}</div><div className="probe-diagnosis"><h3>Диагностика причины</h3><p>Это не ICMP-ping: проверяются API Mihomo, его DNS и конкретный VPN-выход.</p>{diagnosticTarget ? <><label>Сайт <select aria-label="Сайт для диагностики" value={diagnosticTarget.key} onChange={(event) => setDiagnosticTargetKey(event.target.value)} disabled={diagnosis.isPending}>{availableTargets.map((target) => <option value={target.key} key={target.key}>{target.label} — {target.url}</option>)}</select></label><button type="button" onClick={() => diagnosis.mutate({ targetKey: diagnosticTarget.key, outbound: inspected })} disabled={diagnosis.isPending}>{diagnosis.isPending ? 'Диагностика…' : `Диагностировать ${diagnosticTarget.label} через ${inspected}`}</button></> : <p className="state-message">Включите хотя бы один сайт в списке ниже.</p>}{diagnosis.error && <p className="form-error" role="alert">{diagnosis.error.message}</p>}{diagnosis.data && <ProbeDiagnosisResult diagnosis={diagnosis.data} />}</div><h3>Последние проверки</h3><ProbeRows probes={recent} />{older.length > 0 && <details><summary>Показать ещё {older.length}</summary><ProbeRows probes={older} /></details>}</aside>
+    <aside className="inspector" aria-labelledby="inspector-title"><p className="eyebrow">ИНСПЕКТОР ВЫХОДА</p><h2 id="inspector-title">{outboundLabel(inspected)}</h2><dl className="metric-list"><div><dt>Роль</dt><dd>{inspectedRole}</dd></div><div><dt>Последняя смена</dt><dd>{data.lastSwitch ? formatDate(data.lastSwitch.observed_at) : 'нет данных'}</dd></div><div><dt>Текущее состояние</dt><dd>{data.selected === inspected ? 'выбран fallback-группой' : 'не выбран fallback-группой'}</dd></div></dl><div className="probe-run"><button type="button" onClick={onRun} disabled={running}>{running ? 'Запуск…' : 'Проверить сейчас'}</button>{runMessage && <p role="status">{runMessage}</p>}{runError && <p className="form-error" role="alert">{runError.message}</p>}</div><div className="probe-diagnosis"><h3>Диагностика причины</h3><p>Это не ICMP-ping: проверяются API Mihomo, его DNS и конкретный VPN-выход.</p>{diagnosticTarget ? <><label>Сайт <select aria-label="Сайт для диагностики" value={diagnosticTarget.key} onChange={(event) => setDiagnosticTargetKey(event.target.value)} disabled={diagnosis.isPending}>{availableTargets.map((target) => <option value={target.key} key={target.key}>{target.label} — {target.url}</option>)}</select></label><button type="button" onClick={() => diagnosis.mutate({ targetKey: diagnosticTarget.key, outbound: inspected })} disabled={diagnosis.isPending}>{diagnosis.isPending ? 'Диагностика…' : `Диагностировать ${diagnosticTarget.label} через ${outboundLabel(inspected)}`}</button></> : <p className="state-message">Включите хотя бы один сайт в списке ниже.</p>}{diagnosis.error && <p className="form-error" role="alert">{diagnosis.error.message}</p>}{diagnosis.data && <ProbeDiagnosisResult diagnosis={diagnosis.data} />}</div><h3>Последние проверки</h3><ProbeRows probes={recent} />{older.length > 0 && <details><summary>Показать ещё {older.length}</summary><ProbeRows probes={older} /></details>}</aside>
   </div>
 }
 
 function ProbeDiagnosisResult({ diagnosis }: { diagnosis: ProbeDiagnosis }) {
   const addresses = diagnosis.dns.addresses.length ? diagnosis.dns.addresses.join(', ') : 'нет публичного IPv4-адреса'
-  return <div className="probe-diagnosis-result" role="status"><p><strong>{diagnosis.conclusion_text}</strong></p><small>{formatDate(diagnosis.observed_at)}</small><ul><li>Контроллер Mihomo: {diagnosticStepText(diagnosis.controller)}</li><li>DNS Mihomo: {diagnosis.dns.hostname || 'не выполнен'}{diagnosis.dns.hostname ? ` → ${addresses}` : ''}{diagnosis.dns.reason ? ` · ${diagnosis.dns.reason}` : ''}</li><li>Выход {diagnosis.outbound}: {diagnosticStepText(diagnosis.exit)}</li></ul></div>
+  return <div className="probe-diagnosis-result" role="status"><p><strong>{diagnosis.conclusion_text}</strong></p><small>{formatDate(diagnosis.observed_at)}</small><ul><li>Контроллер Mihomo: {diagnosticStepText(diagnosis.controller)}</li><li>DNS Mihomo: {diagnosis.dns.hostname || 'не выполнен'}{diagnosis.dns.hostname ? ` → ${addresses}` : ''}{diagnosis.dns.reason ? ` · ${diagnosis.dns.reason}` : ''}</li><li>Выход {outboundLabel(diagnosis.outbound)}: {diagnosticStepText(diagnosis.exit)}</li></ul></div>
 }
 
 function diagnosticStepText(step: ProbeDiagnosis['controller']): string {

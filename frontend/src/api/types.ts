@@ -245,7 +245,8 @@ export interface UpdatesResponse {
 
 export interface JournalEvent {
   id: number
-  kind: 'audit' | 'route' | 'probe'
+  kind: 'audit' | 'route' | 'probe' | 'outbound_health'
+  target?: string | null
   observed_at: string
   actor: string | null
   action: string
@@ -297,4 +298,40 @@ export interface JournalFilters {
   endpoint?: string
   page?: string
   page_size?: string
+}
+
+export interface OutboundHealthItem {
+  id: 'WG-IMP' | 'HY2-USA' | 'ANTIDPI'
+  label: string
+  engine: string
+  state: 'healthy' | 'degraded' | 'pending' | 'down' | 'unknown'
+  observed_at: string | null
+  pending_since: string | null
+  incident_id: number | null
+  incident_started_at: string | null
+  last_success_at: string | null
+  recovery_streak: number
+  successes: number
+  total: number
+  selected_fallback: 'WG-IMP' | 'HY2-USA' | null
+  reasons: string[]
+}
+
+export interface OutboundHealthResponse {
+  enabled: boolean
+  observed_at: string | null
+  collector_state: 'disabled' | 'healthy' | 'unknown'
+  outbounds: OutboundHealthItem[]
+  delivery: {
+    state: 'disabled' | 'pending' | 'accepted' | 'error'
+    error_code: string | null
+    telegram_delivery: 'unconfirmed'
+    monitors: {
+      key: string
+      state: 'pending' | 'accepted' | 'error'
+      last_attempt_at: string | null
+      last_accepted_at: string | null
+      error_code: string | null
+    }[]
+  }
 }

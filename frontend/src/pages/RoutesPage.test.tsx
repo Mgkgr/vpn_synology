@@ -15,11 +15,11 @@ describe('RoutesPage', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<QueryClientProvider client={client}><RoutesPage data={routeFixture({ active: 'HY2-USA' })} /></QueryClientProvider>)
 
-    expect(screen.getByText('Основной: WG-IMP')).toBeVisible()
-    expect(screen.getByText('Резервный: HY2-USA')).toBeVisible()
-    expect(screen.getByText('сейчас: HY2-USA')).toBeVisible()
+    expect(screen.getByText('Основной: VLESS-NL')).toBeVisible()
+    expect(screen.getByText('Резервный: HY2-DE')).toBeVisible()
+    expect(screen.getByText('сейчас: HY2-DE')).toBeVisible()
     expect(screen.getByText('переключён на резерв')).toBeVisible()
-    expect(screen.queryByText('WG-IMP → HY2-USA')).not.toBeInTheDocument()
+    expect(screen.queryByText('VLESS-NL → HY2-DE')).not.toBeInTheDocument()
   })
 
   it('показывает две последние проверки, раскрывает историю и запускает проверку вручную', async () => {
@@ -59,7 +59,7 @@ describe('RoutesPage', () => {
     vi.spyOn(api, 'probeTargets').mockResolvedValue([
       { key: 'openai', label: 'OpenAI', url: 'https://www.openai.com/', enabled: true, position: 1, is_custom: false },
     ])
-    vi.spyOn(api, 'diagnoseProbe').mockResolvedValue({
+    const diagnose = vi.spyOn(api, 'diagnoseProbe').mockResolvedValue({
       observed_at: '2026-07-14T12:00:00Z', outbound: 'WG-IMP', endpoint: 'https://www.openai.com/', conclusion: 'exit_failure',
       conclusion_text: 'Контроллер и DNS отвечают; проверка через выбранный выход не завершилась.',
       controller: { succeeded: true, latency_ms: 4, reason: null },
@@ -71,10 +71,11 @@ describe('RoutesPage', () => {
     render(<QueryClientProvider client={client}><RoutesPage /></QueryClientProvider>)
 
     await screen.findByText('Сайты для проверок')
-    fireEvent.click(screen.getByRole('button', { name: 'Диагностировать OpenAI через WG-IMP' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Диагностировать OpenAI через VLESS-NL' }))
+    await waitFor(() => expect(diagnose.mock.calls[0]?.[0]).toEqual({ targetKey: 'openai', outbound: 'WG-IMP' }))
     expect(await screen.findByText('Контроллер и DNS отвечают; проверка через выбранный выход не завершилась.')).toBeVisible()
     expect(screen.getByText('DNS Mihomo: www.openai.com → 104.18.33.45')).toBeVisible()
-    expect(screen.getByText('Выход WG-IMP: controller request timed out')).toBeVisible()
+    expect(screen.getByText('Выход VLESS-NL: controller request timed out')).toBeVisible()
   })
 
   it('создаёт собственную цель проверки без перезагрузки страницы', async () => {

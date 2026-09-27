@@ -26,7 +26,7 @@ from app.auth import (
     get_auth_service,
     require_admin,
 )
-from app.models import AuditEvent, GatewayTrafficSample, GeoFileMetadata, GeoUpdate, ProbeEvent, RouteEvent, TrafficMonthly
+from app.models import AuditEvent, GatewayTrafficSample, GeoFileMetadata, GeoUpdate, OutboundIncident, ProbeEvent, RouteEvent, TrafficMonthly
 from app.policy_rules import (
     POLICY_CATEGORIES,
     ManagedRuleConfigurationError,
@@ -103,6 +103,9 @@ class RuntimeContainer:
     trusted_hosts: tuple[str, ...] = ("testserver",)
     max_request_body_bytes: int = 65_536
     host_health_path: Path = Path("/data/host-health.json")
+    outbound_health: Any | None = None
+    outbound_health_enabled: bool = False
+    kuma_publisher: Any | None = None
 
 
 def build_api_router() -> APIRouter:
@@ -818,7 +821,8 @@ def build_api_router() -> APIRouter:
             audit_rows = session.scalars(select(AuditEvent).order_by(AuditEvent.id.desc()).limit(read_limit)).all()
             route_rows = session.scalars(select(RouteEvent).order_by(RouteEvent.id.desc()).limit(read_limit)).all()
             probe_rows = session.scalars(select(ProbeEvent).order_by(ProbeEvent.id.desc()).limit(read_limit)).all()
-        events = _journal_events(audit_rows, route_rows, probe_rows, filters)
+            incident_rows = session.scalars(select(OutboundIncident).order_by(OutboundIncident.id.desc()).limit(read_limit)).all()
+        events = _journal_events(audit_rows, route_rows, probe_rows, filters, incident_rows)
         start = (page - 1) * page_size
         end = start + page_size
         return JournalResponse(events=events[start:end], page=page, page_size=page_size, has_more=len(events) > end)
@@ -1337,6 +1341,7 @@ def _journal_events(
     route_rows: list[RouteEvent],
     probe_rows: list[ProbeEvent],
     filters: _JournalFilters,
+    incident_rows: list[OutboundIncident] = (),
 ) -> list[JournalEventResponse]:
     events: list[JournalEventResponse] = []
     for row in audit_rows:
@@ -1394,6 +1399,7 @@ def _journal_events(
             JournalEventResponse(
                 id=row.id,
                 kind="probe",
+                target=_safe_text(row.target),
                 observed_at=row.observed_at,
                 actor=None,
                 action="probe",
@@ -1406,6 +1412,18 @@ def _journal_events(
                 latency_ms=_optional_nonnegative(row.latency_ms),
             )
         )
+    for row in incident_rows:
+        if filters.endpoint is not None or (filters.outbound is not None and row.outbound != filters.outbound):
+            continue
+        for recovery, when in ((False, row.confirmed_at), (True, row.recovered_at)):
+            action = "incident_recovered" if recovery else "incident_down"
+            if when is None or not _matches_time(when, filters) or not _matches_action(action, filters):
+                continue
+            events.append(JournalEventResponse(
+                id=row.id * 2 + int(recovery), kind="outbound_health", observed_at=when,
+                actor=None, action=action, target=row.outbound, outbound=None, endpoint=None,
+                revision_number=None, succeeded=recovery, status_code=None, restored=None,
+            ))
     return sorted(events, key=lambda item: (item.observed_at, item.kind, item.id), reverse=True)
 
 

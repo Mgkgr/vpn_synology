@@ -336,7 +336,8 @@ class UpdatesResponse(BaseModel):
 
 class JournalEventResponse(BaseModel):
     id: int
-    kind: Literal["audit", "route", "probe"]
+    kind: Literal["audit", "route", "probe", "outbound_health"]
+    target: str | None = None
     observed_at: datetime
     actor: str | None
     action: str
@@ -354,6 +355,46 @@ class JournalResponse(BaseModel):
     page: int = Field(ge=1)
     page_size: int = Field(ge=10, le=200)
     has_more: bool
+
+
+class OutboundHealthResponse(BaseModel):
+    id: Literal["WG-IMP", "HY2-USA", "ANTIDPI"]
+    label: str
+    engine: str
+    state: Literal["healthy", "degraded", "pending", "down", "unknown"]
+    observed_at: datetime | None
+    pending_since: datetime | None
+    incident_id: int | None
+    incident_started_at: datetime | None
+    last_success_at: datetime | None
+    recovery_streak: int
+    successes: int
+    total: int = 3
+    reasons: list[str]
+    selected_fallback: Literal["WG-IMP", "HY2-USA"] | None
+
+
+class HealthDeliveryMonitorResponse(BaseModel):
+    key: str
+    state: Literal["pending", "accepted", "error"]
+    last_attempt_at: datetime | None
+    last_accepted_at: datetime | None
+    error_code: str | None
+
+
+class HealthDeliveryResponse(BaseModel):
+    state: Literal["disabled", "pending", "accepted", "error"]
+    error_code: str | None = None
+    telegram_delivery: Literal["unconfirmed"] = "unconfirmed"
+    monitors: list[HealthDeliveryMonitorResponse] = Field(default_factory=list)
+
+
+class OutboundHealthStatusResponse(BaseModel):
+    enabled: bool
+    observed_at: datetime | None
+    collector_state: Literal["disabled", "healthy", "unknown"]
+    outbounds: list[OutboundHealthResponse]
+    delivery: HealthDeliveryResponse
 
 
 class TrafficUsageResponse(BaseModel):

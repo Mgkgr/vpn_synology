@@ -1,0 +1,13 @@
+.outbound-health-panel { margin-block: 14px; }
+.outbound-health-panel .section-heading p { font-size: .75rem; color: #98abc5; margin-block: 5px 0; }
+.outbound-health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; padding: 0 16px 16px; }
+.outbound-health-card { border: 1px solid #354660; border-left-width: 3px; padding: 14px; min-width: 0; overflow-wrap: anywhere; }
+.outbound-health-card h3 { margin: 0 0 10px; font-size: 1rem; }
+.outbound-health-card p { font-size: .8rem; color: #a9b9d0; margin-block: 6px; }
+.outbound-health-card .health-observation { color: #dfeafb; }
+.outbound-health-card.health-healthy { border-left-color: #4dce9b; }
+.outbound-health-card.health-degraded, .outbound-health-card.health-pending { border-left-color: #dfba64; }
+.outbound-health-card.health-down { border-left-color: #f27b87; }
+.outbound-health-card.health-unknown { border-left-color: #8b9bb3; }
+.outbound-health-delivery { padding: 0 16px 16px; color: #a9b9d0; font-size: .8rem; overflow-wrap: anywhere; }
+.outbound-health-delivery summary { cursor: pointer; }

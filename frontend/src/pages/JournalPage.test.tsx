@@ -14,7 +14,9 @@ describe('JournalPage', () => {
 
     render(<QueryClientProvider client={client}><JournalPage /></QueryClientProvider>)
 
-    fireEvent.change(screen.getByPlaceholderText('WG-IMP'), { target: { value: 'HY2-USA' } })
+    fireEvent.change(screen.getByPlaceholderText('VLESS-NL'), { target: { value: 'HY2-DE' } })
     await waitFor(() => expect(journal).toHaveBeenLastCalledWith(expect.objectContaining({ outbound: 'HY2-USA' })))
+    fireEvent.change(screen.getByPlaceholderText('VLESS-NL'), { target: { value: 'VLESS-NL' } })
+    await waitFor(() => expect(journal).toHaveBeenLastCalledWith(expect.objectContaining({ outbound: 'WG-IMP' })))
   })
 })

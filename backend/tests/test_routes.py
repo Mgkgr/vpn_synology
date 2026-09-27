@@ -636,6 +636,7 @@ def test_journal_filters_real_probe_and_route_fields_on_the_server(route_parts) 
         {
             "id": 1,
             "kind": "probe",
+            "target": "HY2-USA",
             "observed_at": "2026-07-13T12:00:00Z",
             "actor": None,
             "action": "probe",

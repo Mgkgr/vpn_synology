@@ -19,6 +19,7 @@ from app.collectors import Collector, register_collector_jobs
 from app.db import create_all, create_session_factory, create_sqlite_engine
 from app.mihomo import MihomoClient
 from app.health_collector import HealthCollector, register_health_jobs
+from app.health_api import build_health_router
 from app.kuma_push import KumaPublisher, KumaPushClient, load_push_tokens, register_kuma_jobs
 from app.outbound_health import HealthService
 from app.outbounds import build_outbound_registry
@@ -96,12 +97,16 @@ def create_collector_runtime(settings: Settings | None = None) -> CollectorRunti
         trusted_proxy_networks=tuple(ip_network(item) for item in settings.trusted_proxy_cidrs),
         max_request_body_bytes=settings.max_request_body_bytes,
     )
+    health = HealthService(session_factory, build_outbound_registry(settings.antidpi_engine))
+    container.outbound_health = health
+    container.outbound_health_enabled = settings.outbound_health_enabled
     health_collector = None
     publisher = None
     if settings.outbound_health_enabled:
-        health_collector = HealthCollector(mihomo, HealthService(session_factory, build_outbound_registry(settings.antidpi_engine)))
+        health_collector = HealthCollector(mihomo, health)
         tokens, token_error = load_push_tokens(settings.kuma_push_tokens_file, tuple(entry.id for entry in health_collector.service.registry))
         publisher = KumaPublisher(session_factory, health_collector.service, KumaPushClient(str(settings.kuma_url)), tokens, token_error)
+        container.kuma_publisher = publisher
     return CollectorRuntime(collector, AsyncIOScheduler(timezone="UTC"), engine.dispose, container, health_collector, publisher)
 
 
@@ -213,6 +218,7 @@ def create_app(
         return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"detail": "invalid request", "loc": locations})
 
     application.include_router(build_api_router())
+    application.include_router(build_health_router())
 
     @application.get("/{path:path}", include_in_schema=False)
     async def serve_spa(path: str) -> FileResponse:
