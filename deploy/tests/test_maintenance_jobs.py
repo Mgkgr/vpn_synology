@@ -112,6 +112,25 @@ class JobTests(unittest.TestCase):
         self.assertCountEqual(results, ["queued", "busy"])
         self.assertEqual(len(self.store.jobs()), 1)
 
+    def test_sqlite_checkpoint_may_remove_wal_during_path_validation(self):
+        wal = Path(str(self.path) + '-wal')
+        original_exists, original_stat = Path.exists, Path.stat
+        def stale_exists(path):
+            return True if path == wal else original_exists(path)
+        def after_checkpoint(path, *args, **kwargs):
+            if path == wal:
+                raise FileNotFoundError(2, 'SQLite checkpoint removed WAL')
+            return original_stat(path, *args, **kwargs)
+        with patch.object(Path, 'exists', stale_exists), patch.object(Path, 'stat', after_checkpoint):
+            self.assertEqual(self.store.submit(JOB, self.request, 'admin', now=100).phase, 'queued')
+        self.assertEqual(len(self.store.jobs()), 1)
+
+    def test_missing_main_database_is_not_recreated_during_connection(self):
+        self.path.unlink()
+        with self.assertRaises(self.m.JobConflict):
+            self.store.jobs()
+        self.assertFalse(self.path.exists())
+
     def test_expired_release_does_not_claim_success(self):
         lease = self.store.acquire_writer("rules", now=100)
         self.assertFalse(self.store.release_writer(lease, outcome="complete", now=191))

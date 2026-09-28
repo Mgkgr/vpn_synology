@@ -97,12 +97,16 @@ class JobStore:
 
     def _connect(self):
         for path in (self.path, Path(str(self.path) + "-wal"), Path(str(self.path) + "-shm")):
-            if path.is_symlink():
+            try:
+                info = path.lstat()
+            except FileNotFoundError:
+                # SQLite may unlink sidecars at the last connection's checkpoint.
+                # The main database must still exist; never silently replace it.
+                if path == self.path:
+                    raise JobConflict("missing_state_file")
+                continue
+            if not stat.S_ISREG(info.st_mode) or (os.name == "posix" and (info.st_uid != 0 or info.st_mode & 0o077)):
                 raise JobConflict("unsafe_state_file")
-            if path.exists():
-                info = path.stat()
-                if not stat.S_ISREG(info.st_mode) or (os.name == "posix" and (info.st_uid != 0 or info.st_mode & 0o077)):
-                    raise JobConflict("unsafe_state_file")
         db = sqlite3.connect(str(self.path), timeout=0.5, isolation_level=None)
         try:
             db.row_factory = sqlite3.Row
