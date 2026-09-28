@@ -113,6 +113,7 @@ def create_args(run_id, role, image, owner_id=None):
         network = 'container:' + owner_id
     return [DOCKER, 'create', '--name', 'vpn-antidpi-check-' + run_id[:12] + '-' + role,
             '--label', 'vpn.dashboard.scope=' + SCOPE, '--label', 'vpn.dashboard.run=' + run_id,
+            '--label', 'vpn.dashboard.role=' + role,
             '--network', network, '--user', '10002:10002', '--cap-drop', 'ALL', '--read-only',
             '--security-opt', 'no-new-privileges:true', '--restart', 'no', '--pids-limit', '64',
             '--memory', '256m' if role == 'engine' else '128m',

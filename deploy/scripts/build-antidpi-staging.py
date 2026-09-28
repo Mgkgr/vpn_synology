@@ -16,7 +16,7 @@ import uuid
 
 DOCKER = '/usr/local/bin/docker'
 STAGING = Path('/volume1/docker/vpn-gateway/.vless-maintenance')
-CONTEXT_SHA256 = '4ab131a9d51c561017833e699f7ebc6b9896463fd4fea9e863e094ab87d8d319'
+CONTEXT_SHA256 = 'd9cfb51327e98210689634882253f8c4aff754f937967b7a5dde939e48a152ad'
 BINARY_SHA256 = 'c70e87c6168af1832b21641a98bb53e3500b1daf6a5df8bfd22fac4a9294abda'
 MEMBERS = {'Dockerfile.engine', 'Dockerfile.socks', '.dockerignore', 'runtime.py',
            'healthcheck.py', '.artifacts/ciadpi-x86_64', '.artifacts/LICENSE',

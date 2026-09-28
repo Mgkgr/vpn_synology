@@ -1,4 +1,6 @@
-"""Staging-only ByeDPI transport. No DNS forwarding or production routing yet."""
+"""Staging-only ByeDPI transport; production registration is a separate gate."""
+import copy
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -11,6 +13,7 @@ import time
 
 
 SECRET_PATH = Path('/run/secrets/socks_password')
+DNS_CONTRACT_PATH = Path('/run/config/dns.json')
 MIHOMO = '/usr/local/bin/mihomo'
 
 
@@ -28,8 +31,55 @@ def read_secret():
         return validate_secret(stream.read(129))
 
 
-def auth_config(secret):
-    return {
+def configure_dns_filter(config):
+    """Pure candidate transform. Never writes or reloads the gateway config."""
+    updated = copy.deepcopy(config)
+    dns = updated.get('dns', {})
+    provider = updated.get('rule-providers', {}).get('managed-antidpi', {})
+    if (dns.get('enable') is not True or dns.get('ipv6', False) is not False
+            or dns.get('enhanced-mode') != 'fake-ip'
+            or dns.get('fake-ip-filter-mode', 'blacklist') != 'blacklist'
+            or provider != {'type': 'file', 'behavior': 'classical', 'format': 'text',
+                            'path': './rules/managed-antidpi.txt'}):
+        raise ValueError('unsupported scoped DNS/provider contract')
+    filters = dns.setdefault('fake-ip-filter', [])
+    if not isinstance(filters, list) or any(not isinstance(value, str) for value in filters):
+        raise ValueError('invalid existing fake-ip-filter')
+    if 'rule-set:managed-antidpi' not in filters:
+        filters.append('rule-set:managed-antidpi')
+    return updated
+
+
+def resolver_config(resolver):
+    address = ipaddress.IPv4Address(resolver)
+    # Explicit RFC1918/loopback only; never a hostname, provider DNS or FakeIP.
+    if not any(address in ipaddress.IPv4Network(cidr) for cidr in
+               ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8')):
+        raise ValueError('numeric gateway DNS resolver required')
+    return 'nameserver {}\noptions timeout:1 attempts:1 ndots:1\n'.format(address)
+
+
+def validate_dns_contract(contract, resolv_conf):
+    if (not isinstance(contract, dict) or set(contract) != {'version', 'resolver'}
+            or type(contract['version']) is not int or contract['version'] != 1
+            or not isinstance(contract['resolver'], str)
+            or resolv_conf != resolver_config(contract['resolver'])):
+        raise ValueError('DNS contract and resolver file must match exactly')
+    return contract['resolver']
+
+
+def read_dns_contract():
+    try:
+        fd = os.open(str(DNS_CONTRACT_PATH), os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return None  # Default remains IP-only; never inherit Docker/system DNS.
+    with os.fdopen(fd, 'r', encoding='utf-8') as stream:
+        contract = json.loads(stream.read(1024))
+    return validate_dns_contract(contract, Path('/etc/resolv.conf').read_text(encoding='ascii'))
+
+
+def auth_config(secret, resolver=None):
+    config = {
         'mode': 'rule', 'log-level': 'silent', 'ipv6': False, 'allow-lan': True,
         'dns': {'enable': False}, 'profile': {'store-selected': False, 'store-fake-ip': False},
         'listeners': [{'name': 'gateway-auth', 'type': 'socks', 'listen': '0.0.0.0',
@@ -39,13 +89,25 @@ def auth_config(secret):
         'rules': ['NETWORK,udp,REJECT', 'IP-CIDR,198.18.0.0/15,REJECT,no-resolve',
                   'IP-CIDR6,::/0,REJECT,no-resolve', 'MATCH,BYEDPI'],
     }
+    if resolver is not None:
+        resolver_config(resolver)
+        config['dns'] = {'enable': True, 'ipv6': False, 'enhanced-mode': 'redir-host',
+                         'use-hosts': False, 'use-system-hosts': False,
+                         'respect-rules': False, 'nameserver': [resolver],
+                         'default-nameserver': [resolver]}
+        # Resolve before forwarding domains too, so a FakeIP DNS answer is rejected.
+        config['rules'][1] = 'IP-CIDR,198.18.0.0/15,REJECT'
+    return config
 
 
-def engine_argv():
-    # Domain requests fail closed until a reviewed non-FakeIP DNS path is wired.
-    return ['/usr/local/bin/ciadpi', '--ip', '127.0.0.1', '--port', '1081',
+def engine_argv(resolver=None):
+    argv = ['/usr/local/bin/ciadpi', '--ip', '127.0.0.1', '--port', '1081',
             '--conn-ip', '0.0.0.0', '--no-udp', '--no-domain', '--max-conn', '128',
             '--timeout', '10', '--split', '1']
+    if resolver is not None:
+        resolver_config(resolver)
+        argv.remove('--no-domain')
+    return argv
 
 
 def compose_config(engine_image, socks_image):
@@ -99,12 +161,13 @@ def probe_socks(port, secret=None):
 
 def run_socks():
     secret = read_secret()
+    resolver = read_dns_contract()
     directory = Path('/tmp/mihomo')
     directory.mkdir(mode=0o700, exist_ok=True)
     config_path = directory / 'config.yaml'
     fd = os.open(str(config_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'w', encoding='utf-8') as stream:
-        json.dump(auth_config(secret), stream)
+        json.dump(auth_config(secret, resolver), stream)
     argv = [MIHOMO, '-d', str(directory), '-f', str(config_path)]
     validation = subprocess.run(argv + ['-t'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL, timeout=15, check=False)
@@ -132,7 +195,7 @@ def run_socks():
 
 def main():
     if sys.argv[1:] == ['engine']:
-        argv = engine_argv()
+        argv = engine_argv(read_dns_contract())
         os.execv(argv[0], argv)
     if sys.argv[1:] == ['socks']:
         try:
