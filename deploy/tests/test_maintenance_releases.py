@@ -78,11 +78,12 @@ class ReleasesTests(unittest.TestCase):
     def test_local_dashboard_requires_commit_and_verified_build(self):
         catalog = importlib.import_module("maintenance.catalog").load_catalog(ROOT / "maintenance/components.json")[4:5]
         commit = "a" * 40
-        artifact = {"component": "dashboard", "release_id": commit, "version": commit, "git_commit": commit, "repository": None, "published_at": NOW.isoformat(), "image": "vpn-dashboard-dashboard@" + DIGEST, "digest": DIGEST, "platform": "linux/amd64", "compatibility": "approved", "validation_id": "local-build-1", "rollback_verified": True, "signature": "not_published"}
+        artifact = {"component": "dashboard", "release_id": commit, "version": commit, "git_commit": commit, "repository": None, "published_at": NOW.isoformat(), "image": DIGEST, "digest": DIGEST, "platform": "linux/amd64", "compatibility": "approved", "validation_id": "local-build-1", "rollback_verified": True, "signature": "not_published"}
         result = self.m.check_releases(catalog, {}, NOW, local_artifacts={"dashboard": artifact})["dashboard"]
         self.assertIsNone(result.freshness_error)
         self.assertEqual(result.releases[0].version, commit)
         self.assertEqual(result.releases[0].compatibility, "approved")
+        self.assertEqual(result.releases[0].image, DIGEST)  # Local image ID is not a repository manifest digest.
         for change in ({"git_commit": "main"}, {"compatibility": "unverified"}, {"digest": "unknown"}):
             result = self.m.check_releases(catalog, {}, NOW, local_artifacts={"dashboard": dict(artifact, **change)})["dashboard"]
             self.assertIsNotNone(result.freshness_error)

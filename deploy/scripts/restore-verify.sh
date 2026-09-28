@@ -1,24 +1,11 @@
 #!/bin/sh
+# Verify one exact snapshot in a fresh private directory, never production.
 set -eu
-
-RESTIC_REPOSITORY=${RESTIC_REPOSITORY:?RESTIC_REPOSITORY is required}
-RESTIC_PASSWORD_FILE=${RESTIC_PASSWORD_FILE:?RESTIC_PASSWORD_FILE is required}
-TARGET_DIR=${TARGET_DIR:-/volume1/docker/vpn-gateway/backups/dashboard/restore-check}
-
-command -v restic >/dev/null || { echo 'restic is required' >&2; exit 1; }
-command -v sqlite3 >/dev/null || { echo 'sqlite3 is required' >&2; exit 1; }
-rm -rf "$TARGET_DIR"
-mkdir -p "$TARGET_DIR"
-RESTIC_PASSWORD_FILE="$RESTIC_PASSWORD_FILE" restic check
-RESTIC_PASSWORD_FILE="$RESTIC_PASSWORD_FILE" restic restore latest --target "$TARGET_DIR"
-DB=$(find "$TARGET_DIR" -name dashboard.sqlite3 -type f | head -n 1)
-[ -n "$DB" ] || { echo 'dashboard.sqlite3 is missing from backup' >&2; exit 1; }
-[ "$(sqlite3 "$DB" 'PRAGMA integrity_check;')" = ok ] || { echo 'SQLite integrity check failed' >&2; exit 1; }
-find "$TARGET_DIR" -name dashboard.env -type f | grep -q . || { echo 'dashboard.env is missing from backup' >&2; exit 1; }
-DASHBOARD_SECRETS=$(find "$TARGET_DIR" -name dashboard-secrets.tar -type f | head -n 1)
-[ -n "$DASHBOARD_SECRETS" ] || { echo 'dashboard secrets archive is missing from backup' >&2; exit 1; }
-tar -tf "$DASHBOARD_SECRETS" | grep -q '^secrets/dashboard_encryption_key$' || { echo 'dashboard encryption secret is missing from backup' >&2; exit 1; }
-GATEWAY_ARCHIVE=$(find "$TARGET_DIR" -name gateway-persistence.tar -type f | head -n 1)
-[ -n "$GATEWAY_ARCHIVE" ] || { echo 'gateway persistence archive is missing from backup' >&2; exit 1; }
-tar -tf "$GATEWAY_ARCHIVE" | grep -Eq '^(wireguard|wg-easy)/' || { echo 'WireGuard persistence is missing from backup' >&2; exit 1; }
-rm -rf "$TARGET_DIR"
+[ "$(id -u)" = 0 ] || { echo 'must run as root' >&2; exit 1; }
+[ "$#" = 1 ] || { echo 'one exact snapshot id is required' >&2; exit 2; }
+case "$1" in *[!a-f0-9]*|'') echo 'invalid snapshot id' >&2; exit 2 ;; esac
+[ "${#1}" = 64 ] || { echo 'full snapshot id is required' >&2; exit 2; }
+[ -f /usr/local/lib/vpn-dashboard-maintenance/maintenance/backup_cli.py ] || { echo 'RESTORE_VERIFY=blocked; reviewed maintenance backup is not installed; no files changed' >&2; exit 1; }
+cd /usr/local/lib/vpn-dashboard-maintenance
+unset PYTHONPATH PYTHONHOME
+exec /usr/bin/python3 -E -B -m maintenance.backup_cli verify "$1"

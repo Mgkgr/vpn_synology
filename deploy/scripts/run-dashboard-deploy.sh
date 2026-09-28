@@ -11,6 +11,15 @@ case "$RUN_ID" in *[!A-Za-z0-9-]*|'') echo 'invalid run id' >&2; exit 2 ;; esac
 [ "$(id -u)" = 0 ] || { echo 'must run as root' >&2; exit 1; }
 [ -x "$DOCKER_BIN" ] || { echo "Docker binary is unavailable: $DOCKER_BIN" >&2; exit 1; }
 
+# The legacy helper does not understand reviewed image pins. Never silently
+# replace a worker-managed image with the source tree's older default.
+for pin_file in /volume1/docker/vpn-dashboard/compose.versions.yaml /volume1/docker/vpn-dashboard-maintenance/private/image-pins.json; do
+  if [ -e "$pin_file" ] || [ -L "$pin_file" ]; then
+    echo 'DEPLOYMENT=blocked; use reviewed maintenance deployment for pinned components' >&2
+    exit 1
+  fi
+done
+
 STATUS_FILE="/tmp/vpn-dashboard-deploy-$RUN_ID.status"
 LOG_FILE="/tmp/vpn-dashboard-deploy-$RUN_ID.log"
 RUN_OWNER=$(stat -c '%U' "$PROJECT_DIR")

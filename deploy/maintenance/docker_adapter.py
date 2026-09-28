@@ -20,7 +20,8 @@ class DockerError(RuntimeError):
 def bounded_run(argv, timeout=60, limit=1048576):
     """A draining reader bounds memory even when Docker produces excessive output."""
     try:
-        process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, shell=False)
+        process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, shell=False,
+            env={"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/root", "DOCKER_HOST": "unix:///var/run/docker.sock", "DOCKER_CONFIG": "/root/.docker"})
     except OSError:
         raise DockerError("docker_unavailable") from None
     chunks = []
@@ -96,6 +97,6 @@ class DockerAdapter:
                 row["digest"] = image_id  # Local build: content-addressed image ID, no registry manifest.
             row["version"] = image.get("version")
             expected = self.expected_images.get(service, "")
-            row["expected_digest"] = expected.rsplit("@", 1)[-1] if "@" in expected else None
+            row["expected_digest"] = expected.rsplit("@", 1)[-1] if "@" in expected else expected if component.source_kind == "local" and DIGEST_RE.fullmatch(expected) else None
             rows.append(row)
         return tuple(rows)

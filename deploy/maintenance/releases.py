@@ -141,12 +141,13 @@ def resolve_approved_release(component: ComponentDefinition, check: ReleaseCheck
     if candidate is None or check.freshness_error or not isinstance(record, dict):
         raise ReleaseError("release_not_approved")
     digest, image = record.get("digest"), record.get("image")
+    allowed_images = (digest,) if component.source_kind == "local" else tuple(repo + "@" + str(digest) for repo in component.image_repositories)
     if (record.get("component") != component.id or record.get("release_id") != release_id
             or record.get("repository") != component.repository or record.get("version") != candidate.version
             or record.get("compatibility") != "approved" or record.get("platform") != platform
             or platform != "linux/amd64" or not record.get("validation_id") or record.get("rollback_verified") is not True
             or record.get("signature") not in ("verified", "not_published")
             or not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest)
-            or image not in tuple(repo + "@" + digest for repo in component.image_repositories)):
+            or image not in allowed_images):
         raise ReleaseError("release_not_approved")
     return replace(candidate, compatibility="approved", digest=digest, image=image)

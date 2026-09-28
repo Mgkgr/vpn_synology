@@ -11,11 +11,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
-from .protocol import RESOURCES, MaintenanceRequest, canonical, parse_request, request_hash, require_id
+from .protocol import COMPONENTS, RESOURCES, MaintenanceRequest, canonical, parse_request, request_hash, require_id
 
 TERMINAL = frozenset(("completed", "failed", "cancelled"))
 CANCELLABLE = frozenset(("queued", "preflight", "backup", "download"))
-TRANSITIONS = {"queued": {"preflight", "cancelled", "failed"}, "preflight": {"backup", "download", "apply", "failed", "cancelled"}, "backup": {"download", "apply", "failed", "cancelled"}, "download": {"apply", "failed", "cancelled"}, "apply": {"verify", "rollback", "failed"}, "verify": {"completed", "rollback", "failed"}, "rollback": {"verify", "failed"}, "needs_reconcile": set()}
+TRANSITIONS = {"queued": {"preflight", "cancelled", "failed"}, "preflight": {"backup", "download", "apply", "failed", "cancelled"}, "backup": {"download", "apply", "failed", "cancelled"}, "download": {"apply", "failed", "cancelled"}, "apply": {"verify", "rollback", "failed"}, "verify": {"apply", "completed", "rollback", "failed"}, "rollback": {"verify", "failed"}, "needs_reconcile": set()}
 
 
 class JobConflict(RuntimeError):
@@ -88,6 +88,10 @@ class JobStore:
                 CREATE TABLE IF NOT EXISTS events (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,
                     phase TEXT NOT NULL, observed_at REAL NOT NULL, code TEXT
+                );
+                CREATE TABLE IF NOT EXISTS recovery_plans (
+                    job_id TEXT NOT NULL, component TEXT NOT NULL, plan_json TEXT NOT NULL,
+                    PRIMARY KEY(job_id, component), FOREIGN KEY(job_id) REFERENCES jobs(job_id)
                 );
             """)
 
@@ -208,11 +212,24 @@ class JobStore:
                 db.execute("DELETE FROM mutation_lock WHERE kind='job' AND token=?", (job_id,))
         return self.get_job(job_id)
 
+    def claim_job(self, job_id, now=None):
+        """Only one runner may cross queued -> preflight, even within one process."""
+        require_id(job_id)
+        now = time.time() if now is None else now
+        with self._write() as db:
+            lock = self._lock(db, now)
+            if not lock or lock["kind"] != "job" or lock["token"] != job_id or lock["state"] != "held":
+                return False
+            changed = db.execute("UPDATE jobs SET phase='preflight',started_at=? WHERE job_id=? AND phase='queued'", (now, job_id)).rowcount
+            if changed:
+                self._event(db, job_id, "preflight", now)
+            return changed == 1
+
     def begin_effect(self, job_id, step, now=None):
         now = time.time() if now is None else now
         with self._write() as db:
             job = db.execute("SELECT phase FROM jobs WHERE job_id=?", (job_id,)).fetchone()
-            if not job or job["phase"] not in ("apply", "rollback"):
+            if not job or job["phase"] not in ("apply", "verify", "rollback"):
                 raise JobConflict("effect_not_allowed")
             row = db.execute("SELECT state FROM effects WHERE job_id=? AND step=?", (job_id, step)).fetchone()
             if row:
@@ -222,12 +239,75 @@ class JobStore:
             db.execute("INSERT INTO effects(job_id,step,state,started_at) VALUES(?,?,'intent',?)", (job_id, step, now))
             return True
 
+    def begin_maintenance(self, job_id, minutes, now=None):
+        require_id(job_id)
+        if minutes not in (15, 30):
+            raise JobConflict("invalid_maintenance_window")
+        now = time.time() if now is None else now
+        with self._write() as db:
+            row = db.execute("SELECT phase,maintenance_until FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if not row or row["phase"] != "apply":
+                raise JobConflict("maintenance_window_not_allowed")
+            if row["maintenance_until"] is None:
+                db.execute("UPDATE jobs SET maintenance_until=? WHERE job_id=?", (now + minutes * 60, job_id))
+                self._event(db, job_id, "maintenance_started", now)
+
+    def set_component(self, job_id, component):
+        require_id(job_id)
+        if component is not None and component not in COMPONENTS:
+            raise JobConflict("invalid_component")
+        with self._write() as db:
+            changed = db.execute("UPDATE jobs SET component=? WHERE job_id=? AND phase NOT IN ('completed','failed','cancelled','needs_reconcile')", (component, job_id)).rowcount
+            if changed != 1:
+                raise JobConflict("job_not_active")
+
+    def needs_reconcile(self, job_id, code, now=None):
+        require_id(job_id)
+        if code not in ("restart_failed", "update_failed", "rollback_failed", "worker_interrupted", "identity_changed"):
+            raise JobConflict("invalid_reconcile_code")
+        now = time.time() if now is None else now
+        with self._write() as db:
+            row = db.execute("SELECT phase FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if not row or row[0] in TERMINAL:
+                raise JobConflict("job_not_active")
+            db.execute("UPDATE jobs SET phase='needs_reconcile',error_code=? WHERE job_id=?", (code, job_id))
+            db.execute("UPDATE mutation_lock SET state='needs_reconcile' WHERE kind='job' AND token=?", (job_id,))
+            self._event(db, job_id, "needs_reconcile", now, code)
+        return self.get_job(job_id)
+
     def finish_effect(self, job_id, step, now=None):
         now = time.time() if now is None else now
         with self._write() as db:
             changed = db.execute("UPDATE effects SET state='complete',finished_at=? WHERE job_id=? AND step=? AND state='intent'", (now, job_id, step)).rowcount
             if not changed:
                 raise JobConflict("effect_not_pending")
+
+    def save_recovery_plan(self, job_id, component, plan):
+        require_id(job_id)
+        if component not in COMPONENTS:
+            raise JobConflict("invalid_component")
+        encoded = canonical(plan).decode("utf-8")
+        if len(encoded) > 65536:
+            raise JobConflict("plan_too_large")
+        with self._write() as db:
+            row = db.execute("SELECT phase FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if not row or row[0] not in ("preflight", "backup", "download"):
+                raise JobConflict("plan_must_precede_apply")
+            db.execute("INSERT INTO recovery_plans VALUES(?,?,?)", (job_id, component, encoded))
+
+    def acknowledge_proven_rollback(self, job_id, component, now=None):
+        """Root runner only, after image + schema + identity restoration proof."""
+        require_id(job_id)
+        if component not in COMPONENTS:
+            raise JobConflict("invalid_component")
+        now = time.time() if now is None else now
+        with self._write() as db:
+            row = db.execute("SELECT phase FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if not row or row[0] != "rollback":
+                raise JobConflict("rollback_not_active")
+            db.execute("UPDATE effects SET state='complete',finished_at=? WHERE job_id=? AND state='intent' AND step LIKE ?",
+                (now, job_id, "update." + component + ".%"))
+            self._event(db, job_id, "rollback_verified", now)
 
     def recover_after_restart(self, now=None):
         now = time.time() if now is None else now
@@ -294,6 +374,6 @@ class JobStore:
         with self._write() as db:
             args = (now - 365 * 86400,)
             query = "SELECT job_id FROM jobs WHERE phase IN ('completed','failed','cancelled') AND finished_at < ?"
-            for table in ("events", "effects"):
+            for table in ("events", "effects", "recovery_plans"):
                 db.execute("DELETE FROM " + table + " WHERE job_id IN (" + query + ")", args)
             db.execute("DELETE FROM jobs WHERE job_id IN (" + query + ")", args)
