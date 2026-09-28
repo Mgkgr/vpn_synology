@@ -24,6 +24,7 @@ import type {
   HostHealth,
   GeoUpdate,
 } from './types'
+import type { CancelOperation, MaintenanceInventory, MaintenanceJob, MaintenanceOperation } from './maintenanceTypes'
 
 export class ApiError extends Error {
   constructor(public readonly status: number, message: string) {
@@ -54,17 +55,20 @@ async function request<T>(path: string, init: RequestInit = {}, notifyUnauthoriz
       csrfToken = null
       unauthorizedHandler?.()
     }
-    const message = response.status === 401
+    const maintenanceError = path.startsWith('/maintenance/')
+      ? ({ 403: 'Действие доступно владельцу. Проверьте пароль и сессию.', 409: 'Состояние изменилось или уже выполняется операция. Обновите данные.', 429: 'Слишком много попыток. Подождите перед повторной проверкой.', 503: 'Исполнитель обслуживания недоступен. Результат операции не подтверждён.' } as Record<number, string>)[response.status]
+      : undefined
+    const message = maintenanceError ?? (response.status === 401
       ? 'Требуется вход в панель.'
       : response.status === 403
         ? 'Сессия истекла. Войдите снова.'
         : response.status === 503 && path === '/host-health'
           ? 'Снимок состояния NAS ещё не собран. Запустите задачу DSM «VPN Dashboard — host health». '
             + 'После первого запуска данные появятся в течение минуты.'
-        : 'Операция не выполнена. Попробуйте ещё раз.'
+        : 'Операция не выполнена. Попробуйте ещё раз.')
     throw new ApiError(response.status, message)
   }
-  if (response.status === 204 || response.status === 202) return undefined as T
+  if (response.status === 204 || (response.status === 202 && !path.startsWith('/maintenance/'))) return undefined as T
   return response.json() as Promise<T>
 }
 
@@ -77,6 +81,13 @@ async function openSession(path: '/auth/login', username: string, password: stri
 }
 
 export const api = {
+  maintenanceComponents: () => request<MaintenanceInventory>('/maintenance/components', { signal: AbortSignal.timeout(12_000) }),
+  maintenanceJobs: () => request<{ available: boolean; jobs: MaintenanceJob[] }>('/maintenance/jobs', { signal: AbortSignal.timeout(12_000) }),
+  maintenanceJob: (jobId: string) => request<MaintenanceJob>(`/maintenance/jobs/${encodeURIComponent(jobId)}`, { signal: AbortSignal.timeout(12_000) }),
+  checkComponentReleases: () => request<{ queued: boolean }>('/maintenance/check', { method: 'POST', body: '{}', signal: AbortSignal.timeout(12_000) }),
+  authorizeMaintenance: (operation: MaintenanceOperation | CancelOperation, password: string) => request<{ grant: string; expires_in: number }>('/maintenance/authorize', { method: 'POST', body: JSON.stringify({ operation, password }), signal: AbortSignal.timeout(12_000) }),
+  submitMaintenance: (jobId: string, operation: MaintenanceOperation, grant: string) => request<MaintenanceJob>('/maintenance/jobs', { method: 'POST', body: JSON.stringify({ job_id: jobId, operation, grant }), signal: AbortSignal.timeout(12_000) }),
+  cancelMaintenance: (jobId: string, grant: string) => request<MaintenanceJob>(`/maintenance/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST', body: JSON.stringify({ grant }), signal: AbortSignal.timeout(12_000) }),
   async restoreSession(): Promise<AuthSession> {
     const session = await request<AuthSession>('/auth/csrf', {}, false)
     csrfToken = session.csrf_token

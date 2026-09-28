@@ -12,7 +12,7 @@ from sqlalchemy import select
 from app.auth import AuthenticatedSession, get_auth_service, require_admin, require_csrf
 from app.maintenance_auth import MaintenanceAuthorizationError, MaintenanceGrantService, MaintenanceStepUpThrottled, operation_hash
 from app.maintenance_client import MaintenanceBusy, MaintenanceClient, MaintenanceConflict, MaintenanceUnavailable
-from app.models import MaintenanceSubmitIntent
+from app.models import MaintenanceSubmitIntent, MaintenanceSubmissionReceipt
 
 Component = Literal["mihomo", "wireguard", "uptime-kuma", "metacubexd", "dashboard", "antidpi"]
 JobId = Annotated[str, Field(pattern=r"^[0-9a-f]{32}$", min_length=32, max_length=32)]
@@ -99,7 +99,21 @@ def _unknown(job_id: str) -> dict:
         "message": "Ответ исполнителя не подтверждён. Проверяется прежняя операция; повторный запуск не выполняется."}
 
 
+def _receipt(request: Request, job_id: str, outcome: str, kind: str = 'submit'):
+    with request.app.state.runtime.session_factory() as session:
+        session.merge(MaintenanceSubmissionReceipt(job_id=job_id, operation_kind=kind, outcome=outcome, observed_at=datetime.now(UTC)))
+        session.commit()
+
+
+def _not_started(job_id: str) -> dict:
+    return {'job_id': job_id, 'phase': 'not_started', 'cancel_allowed': False}
+
+
 async def _status(request: Request, job_id: str) -> dict:
+    with request.app.state.runtime.session_factory() as session:
+        receipt = session.get(MaintenanceSubmissionReceipt, (job_id, 'submit'))
+        if receipt and receipt.outcome == 'rejected':
+            return _not_started(job_id)
     try:
         return await _client(request).get_job(job_id)
     except (MaintenanceUnavailable, MaintenanceConflict):
@@ -119,7 +133,9 @@ def build_maintenance_router() -> APIRouter:
             return {"available": False, "can_maintain": False, "components": [], "revision": None}
         if not isinstance(inventory, dict):
             raise MaintenanceUnavailable()
-        return {**inventory, "available": True, "can_maintain": get_auth_service(request).is_owner(principal)}
+        owner = get_auth_service(request).is_owner(principal)
+        return {**inventory, "available": True, "can_check": owner,
+            "can_maintain": owner and inventory.get("execution_ready") is True}
 
     @router.post("/check", status_code=202)
     async def check(payload: EmptyBody, request: Request, _: AuthenticatedSession = Depends(_owner_write)):
@@ -135,8 +151,12 @@ def build_maintenance_router() -> APIRouter:
         with request.app.state.runtime.session_factory() as session:
             intents = session.scalars(select(MaintenanceSubmitIntent).where(MaintenanceSubmitIntent.operation_kind == "submit")
                 .order_by(MaintenanceSubmitIntent.created_at.desc()).limit(100)).all()
+            receipts = dict(session.execute(select(MaintenanceSubmissionReceipt.job_id, MaintenanceSubmissionReceipt.outcome)
+                .where(MaintenanceSubmissionReceipt.operation_kind == 'submit', MaintenanceSubmissionReceipt.job_id.in_([row.job_id for row in intents]))).all())
         known = {row["job_id"] for row in records}
-        return {"available": available, "jobs": [*records, *(_unknown(row.job_id) for row in intents if row.job_id not in known)]}
+        missing = [_not_started(row.job_id) if receipts.get(row.job_id) == 'rejected' else _unknown(row.job_id)
+            for row in intents if row.job_id not in known and receipts.get(row.job_id) != 'accepted']
+        return {"available": available, "jobs": [*records, *missing]}
 
     @router.get("/jobs/{job_id}")
     async def job(request: Request, job_id: Annotated[str, Path(pattern=r"^[0-9a-f]{32}$", min_length=32, max_length=32)], _: AuthenticatedSession = Depends(require_admin)):
@@ -156,7 +176,12 @@ def build_maintenance_router() -> APIRouter:
         if not first:
             return await _status(request, payload.job_id)
         try:
-            return await _client(request).submit(payload.job_id, operation, principal.username)
+            result = await _client(request).submit(payload.job_id, operation, principal.username)
+            _receipt(request, payload.job_id, 'accepted')
+            return result
+        except (MaintenanceBusy, MaintenanceConflict):
+            _receipt(request, payload.job_id, 'rejected')
+            raise
         except MaintenanceUnavailable:
             return _unknown(payload.job_id)
 
@@ -168,7 +193,12 @@ def build_maintenance_router() -> APIRouter:
         if not first:
             return await _status(request, job_id)
         try:
-            return await _client(request).cancel(job_id, principal.username)
+            result = await _client(request).cancel(job_id, principal.username)
+            _receipt(request, job_id, 'accepted', 'cancel')
+            return result
+        except (MaintenanceBusy, MaintenanceConflict):
+            _receipt(request, job_id, 'rejected', 'cancel')
+            raise
         except MaintenanceUnavailable:
             return _unknown(job_id)
 

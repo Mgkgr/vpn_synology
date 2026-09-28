@@ -51,16 +51,19 @@ def process_lock(private_path: Path):
 
 
 class MaintenanceService:
-    def __init__(self, store, inventory=None, queue_release_check=None):
+    def __init__(self, store, inventory=None, queue_release_check=None, executor_ready=None):
         self.store = store
         self.inventory = inventory
         self.queue_release_check = queue_release_check
+        self.executor_ready = executor_ready or (lambda: False)
 
     def handle(self, raw, peer_uid):
         try:
             frame = decode_frame(raw, peer_uid)
             method, params = frame["method"], frame["params"]
             if method == "submit":
+                if self.executor_ready() is not True:
+                    return {"ok": False, "error": "not_configured"}
                 result = asdict(self.store.submit(params["job_id"], parse_request(params["request"]), params["actor"]))
             elif method == "cancel":
                 result = asdict(self.store.cancel(params["job_id"]))
@@ -77,6 +80,7 @@ class MaintenanceService:
                 result = {"released": self.store.release_writer(params["lease_id"], params["outcome"])}
             elif method == "components" and self.inventory:
                 result = self.inventory()  # Cached bounded safe snapshot, never Docker inspect on this connection.
+                result = {**result, "execution_ready": self.executor_ready() is True}
             elif method == "check_releases" and self.queue_release_check:
                 result = self.queue_release_check()  # Enqueue only; HTTP checks have their own bounded worker.
             else:

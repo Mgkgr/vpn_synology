@@ -26,7 +26,7 @@ def system(tmp_path):
     create_all(engine)
     sessions = create_session_factory(engine)
     frames = []
-    state = {"lost": False, "busy": False}
+    state = {"lost": False, "busy": False, "execution_ready": True}
 
     async def transport(frame):
         frames.append(frame)
@@ -38,11 +38,13 @@ def system(tmp_path):
                 assert PASSWORD not in intent.request_json
             if state["lost"]:
                 raise TimeoutError()
+            if state["busy"]:
+                return {"ok": False, "error": "busy", "job_id": 'c' * 32}
         if method == "writer_acquire" and state["busy"]:
             return {"ok": False, "error": "busy", "job_id": JOB}
         result = {"job_id": JOB, "phase": "queued"}
         if method == "components":
-            result = {"components": [], "revision": "a" * 64}
+            result = {"components": [], "revision": "a" * 64, "execution_ready": state["execution_ready"]}
         elif method == "jobs":
             result = []
         elif method == "writer_acquire":
@@ -81,6 +83,14 @@ def test_components_capability_is_owner_only_but_admin_can_read(system):
                       (f"jobs/{JOB}/cancel", {"grant": "fake"})):
         assert client.post("/api/maintenance/" + url, json=body).status_code == 403
     assert not any(f["method"] in {"submit", "cancel", "check_releases"} for f in frames)
+
+
+def test_unconfigured_executor_does_not_offer_mutations_to_owner(system):
+    client, _, _, state, _ = system
+    state["execution_ready"] = False
+    result = client.get('/api/maintenance/components').json()
+    assert result['available'] is True
+    assert result['can_maintain'] is False
 
 
 def test_busy_actual_writers_return_409_and_login_stays_available(system, tmp_path):
@@ -142,6 +152,26 @@ def test_lost_submit_response_is_unknown_not_a_resubmission(system):
     assert response.status_code == 202 and response.json()["phase"] == "unknown"
     assert client.post("/api/maintenance/jobs", json=body).json()["phase"] == "queued"
     assert [f["method"] for f in frames] == ["submit", "job"]
+
+
+def test_explicitly_refused_submission_is_not_shown_as_running_unknown(system):
+    client, _, frames, state, _ = system
+    token = grant(client)
+    state['busy'] = True
+    body = {'operation': OPERATION, 'grant': token, 'job_id': JOB}
+    assert client.post('/api/maintenance/jobs', json=body).status_code == 409
+    assert client.get('/api/maintenance/jobs/' + JOB).json()['phase'] == 'not_started'
+    assert client.get('/api/maintenance/jobs').json()['jobs'][0]['phase'] == 'not_started'
+    assert client.post('/api/maintenance/jobs', json=body).json()['phase'] == 'not_started'
+    assert sum(frame['method'] == 'submit' for frame in frames) == 1
+
+
+def test_accepted_job_missing_from_recent_window_is_not_fake_unknown(system):
+    client, _, _, _, _ = system
+    token = grant(client)
+    assert client.post('/api/maintenance/jobs', json={'operation': OPERATION, 'grant': token, 'job_id': JOB}).status_code == 202
+    # Worker jobs fixture is empty: accepted jobs can fall outside its recent window.
+    assert client.get('/api/maintenance/jobs').json()['jobs'] == []
 
 
 def test_cancel_requires_its_own_grant_and_only_calls_once(system):

@@ -64,6 +64,16 @@ class MaintenanceSubmitIntent(Base):
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
 
+class MaintenanceSubmissionReceipt(Base):
+    """A definite worker acceptance/refusal, distinct from a lost response."""
+
+    __tablename__ = "maintenance_submission_receipts"
+    job_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    operation_kind: Mapped[str] = mapped_column(String(16), primary_key=True)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+
+
 class PeerSnapshotRecord(Base):
     __tablename__ = "peer_snapshots"
     __table_args__ = (

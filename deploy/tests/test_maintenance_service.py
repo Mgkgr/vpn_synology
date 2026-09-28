@@ -20,7 +20,7 @@ class ServiceTests(unittest.TestCase):
         self.store = importlib.import_module("maintenance.store").JobStore(Path(self.temp.name) / "private/jobs.sqlite3")
 
     def test_service_persists_before_response_and_exports_only_safe_errors(self):
-        service = self.m.MaintenanceService(self.store)
+        service = self.m.MaintenanceService(self.store, executor_ready=lambda: True)
         params = {"job_id": "a" * 32, "actor": "admin", "request": {"action": "restart", "components": ["mihomo"], "expected_revision": "b" * 64, "release_ids": {}, "enable_stopped": [], "snapshot_id": None, "accept_data_loss": False}}
         raw = json.dumps({"version": 1, "method": "submit", "params": params}).encode() + b"\n"
         response = service.handle(raw, 10001)
@@ -30,6 +30,13 @@ class ServiceTests(unittest.TestCase):
         with patch.object(self.store, "submit", side_effect=OSError("secret=/private/path")):
             result = service.handle(raw, 10001)
         self.assertEqual(result, {"ok": False, "error": "storage_unavailable"})
+
+    def test_unconfigured_executor_refuses_submission_without_queuing(self):
+        service = self.m.MaintenanceService(self.store)
+        params = {"job_id": "a" * 32, "actor": "owner", "request": {"action": "restart", "components": ["mihomo"], "expected_revision": "b" * 64, "release_ids": {}, "enable_stopped": [], "snapshot_id": None, "accept_data_loss": False}}
+        result = service.handle(json.dumps({"version": 1, "method": "submit", "params": params}).encode() + b'\n', 10001)
+        self.assertEqual(result, {"ok": False, "error": "not_configured"})
+        self.assertFalse(self.store.jobs())
 
     def test_socket_path_rejects_symlink_even_before_binding(self):
         with patch.object(Path, "is_symlink", return_value=True), self.assertRaises(self.m.ServiceError):

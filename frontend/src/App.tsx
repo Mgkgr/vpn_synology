@@ -12,6 +12,7 @@ import { OverviewPage } from './pages/OverviewPage'
 import { RoutesPage } from './pages/RoutesPage'
 import { RulesPage } from './pages/RulesPage'
 import { UpdatesPage } from './pages/UpdatesPage'
+import { ComponentsPage } from './pages/ComponentsPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -47,6 +48,7 @@ function ApplicationRoutes() {
     <Route path="/updates" element={<Protected sessionKey={authVersion}><UpdatesPage /></Protected>} />
     <Route path="/journal" element={<Protected sessionKey={authVersion}><JournalPage /></Protected>} />
     <Route path="/administrators" element={<Protected sessionKey={authVersion}><AdministratorsPage /></Protected>} />
+    <Route path="/system/components" element={<Protected sessionKey={authVersion}><ComponentsPage /></Protected>} />
     <Route path="*" element={<Navigate to="/overview" replace />} />
   </Routes>
 }

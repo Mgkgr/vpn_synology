@@ -8,6 +8,14 @@ afterEach(() => {
 })
 
 describe('клиент защищённого API', () => {
+  it('читает job id из принятого 202 ответа обслуживания', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ job_id: 'b'.repeat(32), phase: 'queued' }), { status: 202 })))
+    const response = await api.submitMaintenance('b'.repeat(32), {
+      action: 'restart', components: ['mihomo'], expected_revision: 'a'.repeat(64),
+      release_ids: {}, enable_stopped: [], snapshot_id: null, accept_data_loss: false,
+    }, 'grant')
+    expect(response.job_id).toBe('b'.repeat(32))
+  })
   it('сбрасывает локальное состояние и уведомляет приложение после 401', async () => {
     const onUnauthorized = vi.fn()
     const removeHandler = setUnauthorizedHandler(onUnauthorized)

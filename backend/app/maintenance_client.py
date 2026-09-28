@@ -104,7 +104,7 @@ class MaintenanceClient:
             return response.get("result")
         if response.get("error") == "busy":
             raise MaintenanceBusy(response.get("job_id"))
-        if response.get("error") in {"conflict", "invalid_request"}:
+        if response.get("error") in {"conflict", "invalid_request"} or (response.get("error") == "not_configured" and method == "submit"):
             raise MaintenanceConflict("Операция не соответствует текущему состоянию.")
         raise MaintenanceUnavailable()
 

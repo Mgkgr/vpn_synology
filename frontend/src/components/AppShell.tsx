@@ -11,6 +11,7 @@ const links = [
   ['/updates', 'Обновления', '05'],
   ['/journal', 'Журнал', '06'],
   ['/administrators', 'Доступ', '07'],
+  ['/system/components', 'Система', '08'],
 ] as const
 
 export function AppShell({ children }: PropsWithChildren) {
