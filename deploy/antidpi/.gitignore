@@ -1,0 +1,4 @@
+.artifacts/
+secrets/
+*.env
+build-result.json

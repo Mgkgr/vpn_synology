@@ -1,0 +1,9 @@
+*
+!Dockerfile.engine
+!Dockerfile.socks
+!runtime.py
+!healthcheck.py
+!.artifacts
+!.artifacts/ciadpi-x86_64
+!.artifacts/LICENSE
+!.artifacts/MIHOMO-LICENSE

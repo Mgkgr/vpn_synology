@@ -1,0 +1,12 @@
+FROM python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+LABEL org.opencontainers.image.source="https://github.com/hufrea/byedpi" \
+      org.opencontainers.image.version="0.17.3" \
+      org.opencontainers.image.revision="7efde1b1296eaaa187b70e951894dde17527489c"
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+COPY .artifacts/ciadpi-x86_64 /usr/local/bin/ciadpi
+COPY .artifacts/LICENSE /usr/share/licenses/byedpi/LICENSE
+COPY runtime.py healthcheck.py /app/
+RUN chmod 0555 /usr/local/bin/ciadpi
+USER 10002:10002
+ENTRYPOINT ["python3", "-B", "/app/runtime.py", "engine"]

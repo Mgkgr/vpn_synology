@@ -1,0 +1,11 @@
+FROM metacubex/mihomo@sha256:e6acd921addecfd59a8e2d38203f88356d635b54de6c0673db0e015139989312 AS mihomo
+FROM python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+LABEL org.opencontainers.image.source="https://github.com/MetaCubeX/mihomo" \
+      org.opencontainers.image.version="1.19.28-antidpi-auth"
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+COPY --from=mihomo /mihomo /usr/local/bin/mihomo
+COPY .artifacts/MIHOMO-LICENSE /usr/share/licenses/mihomo/LICENSE
+COPY runtime.py healthcheck.py /app/
+USER 10002:10002
+ENTRYPOINT ["python3", "-B", "/app/runtime.py", "socks"]

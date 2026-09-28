@@ -1,0 +1,47 @@
+{
+  "name": "vpn-antidpi-staging",
+  "services": {
+    "antidpi": {
+      "image": "sha256:4b1a979275a13a271786e41e57d825ccfc358b50d353ad5c4a9828497eedfbdb",
+      "pull_policy": "never",
+      "user": "10002:10002",
+      "restart": "no",
+      "read_only": true,
+      "cap_drop": ["ALL"],
+      "security_opt": ["no-new-privileges:true"],
+      "pids_limit": 64,
+      "mem_limit": "256m",
+      "stop_grace_period": "10s",
+      "tmpfs": ["/tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777"],
+      "logging": {"driver": "json-file", "options": {"max-size": "1m", "max-file": "2"}},
+      "healthcheck": {
+        "test": ["CMD", "python3", "-B", "/app/healthcheck.py", "engine"],
+        "interval": "10s", "timeout": "4s", "retries": 2, "start_period": "5s"
+      },
+      "network_mode": "none"
+    },
+    "socks": {
+      "image": "sha256:bbe7f6bbfd49c10471d7e9ddcf6c59808a7134ad27de1503063f01e8824f27c6",
+      "pull_policy": "never",
+      "user": "10002:10002",
+      "restart": "no",
+      "read_only": true,
+      "cap_drop": ["ALL"],
+      "security_opt": ["no-new-privileges:true"],
+      "pids_limit": 64,
+      "mem_limit": "128m",
+      "stop_grace_period": "10s",
+      "tmpfs": ["/tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777"],
+      "logging": {"driver": "json-file", "options": {"max-size": "1m", "max-file": "2"}},
+      "healthcheck": {
+        "test": ["CMD", "python3", "-B", "/app/healthcheck.py", "socks"],
+        "interval": "10s", "timeout": "4s", "retries": 2, "start_period": "5s"
+      },
+      "network_mode": "service:antidpi",
+      "depends_on": {"antidpi": {"condition": "service_healthy"}},
+      "volumes": [
+        {"type": "bind", "source": "./secrets/socks_password", "target": "/run/secrets/socks_password", "read_only": true}
+      ]
+    }
+  }
+}

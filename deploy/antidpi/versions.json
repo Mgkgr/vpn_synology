@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "stage": "offline_transport_staging_only",
+  "engine": "byedpi",
+  "engine_version": "0.17.3",
+  "source_repository": "https://github.com/hufrea/byedpi",
+  "source_commit": "7efde1b1296eaaa187b70e951894dde17527489c",
+  "source_archive_sha256": "ca696af46ebe22f81dae66531aa7fcb53a77d636ffbb5685e68d08f6e61ebcc1",
+  "release_archive_url": "https://github.com/hufrea/byedpi/releases/download/v0.17.3/byedpi-17.3-x86_64.tar.gz",
+  "release_archive_sha256": "98f73c32eacb571ebd88d790f6376ed9e70f02d44c1fe862472ecea75cd7117d",
+  "binary_sha256": "c70e87c6168af1832b21641a98bb53e3500b1daf6a5df8bfd22fac4a9294abda",
+  "python_base": "python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de",
+  "mihomo_base": "metacubex/mihomo@sha256:e6acd921addecfd59a8e2d38203f88356d635b54de6c0673db0e015139989312",
+  "engine_image_id": "sha256:4b1a979275a13a271786e41e57d825ccfc358b50d353ad5c4a9828497eedfbdb",
+  "socks_image_id": "sha256:bbe7f6bbfd49c10471d7e9ddcf6c59808a7134ad27de1503063f01e8824f27c6",
+  "build_id": "451590f4097147c6a60d8e4a02d01ea0",
+  "offline_probe_id": "5b95e1de4d2047e5b7d81f9376144e0b",
+  "production_ready": false,
+  "udp_verified": false,
+  "dns_contract_verified": false,
+  "dpi_bypass_verified": false,
+  "auto_strategy_verified": false
+}
