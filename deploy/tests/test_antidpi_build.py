@@ -38,6 +38,13 @@ class AntidpiBuildTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.module.verify_archive(self.archive(), '0' * 64, {'runtime.py'})
 
+    def test_every_copied_runtime_file_is_in_the_build_allowlist(self):
+        folder = SCRIPT.parents[1] / 'antidpi'
+        ignored = (folder / '.dockerignore').read_text(encoding='utf-8').splitlines()
+        for name in ('runtime.py', 'healthcheck.py', 'dns_pins.py'):
+            self.assertIn(name, self.module.MEMBERS)
+            self.assertIn('!' + name, ignored)
+
     def test_path_traversal_symlinks_and_missing_files_are_rejected(self):
         for name, link in (('../runtime.py', False), ('/runtime.py', False), ('runtime.py', True), ('other.py', False)):
             blob = self.archive(name, link=link)

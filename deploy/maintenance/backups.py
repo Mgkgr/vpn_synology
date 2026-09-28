@@ -26,7 +26,7 @@ MAX_FILES = 2000
 MAX_BYTES = 4 * 1024 ** 3
 MAX_MANIFEST = 2 * 1024 ** 2
 SOURCE_ROOTS = tuple(Path(item) for item in (
-    "/volume1/docker/vpn-gateway", "/volume1/docker/vpn-dashboard/deploy",
+    "/volume1/docker/vpn-gateway", "/volume1/docker/vpn-dashboard",
     "/volume1/docker/vpn-antidpi", "/volume1/docker/vpn-dashboard-maintenance/private",
 ))
 REQUIRED_ROLES = frozenset(("wg_identity", "config", "dashboard_secrets", "worker_state"))

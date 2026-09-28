@@ -2,7 +2,7 @@
   "name": "vpn-antidpi-staging",
   "services": {
     "antidpi": {
-      "image": "sha256:8db90a4ca2f91afbc4db23a4ba63a5c1b3adf119e90f56c0ed69b3d8623191cc",
+      "image": "sha256:c6b8bd979ff746b7b5cc10a8be9123c473146c1fe198e1e34d336c7dd3dc0d0f",
       "pull_policy": "never",
       "user": "10002:10002",
       "restart": "no",
@@ -21,7 +21,7 @@
       "network_mode": "none"
     },
     "socks": {
-      "image": "sha256:16119b88b2e56628a496393446ae45aa7a19a32edab66a2aeb2ca5c6869d4393",
+      "image": "sha256:4ebdf3deecf37a8613bac4ca45adf62b98f5428ab9db0fa03f370a3060bad176",
       "pull_policy": "never",
       "user": "10002:10002",
       "restart": "no",

@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -14,6 +15,7 @@ import time
 
 SECRET_PATH = Path('/run/secrets/socks_password')
 DNS_CONTRACT_PATH = Path('/run/config/dns.json')
+DNS_PINS_PATH = Path('/run/config/dns-pins.json')
 MIHOMO = '/usr/local/bin/mihomo'
 
 
@@ -76,6 +78,22 @@ def read_dns_contract():
     with os.fdopen(fd, 'r', encoding='utf-8') as stream:
         contract = json.loads(stream.read(1024))
     return validate_dns_contract(contract, Path('/etc/resolv.conf').read_text(encoding='ascii'))
+
+
+def read_dns_pins():
+    from dns_pins import validate_pins
+    if DNS_CONTRACT_PATH.exists():
+        # v1 was an offline fixed-answer experiment, not safe for Internet use.
+        raise ValueError('legacy dynamic DNS contract is not permitted')
+    try:
+        fd = os.open(str(DNS_PINS_PATH), os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return None
+    with os.fdopen(fd, 'r', encoding='utf-8') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 16384 or info.st_mode & 0o077:
+            raise ValueError('DNS snapshot must be a private regular file')
+        return validate_pins(json.loads(stream.read(16385)))
 
 
 def auth_config(secret, resolver=None):
@@ -161,13 +179,17 @@ def probe_socks(port, secret=None):
 
 def run_socks():
     secret = read_secret()
-    resolver = read_dns_contract()
+    pins = read_dns_pins()
     directory = Path('/tmp/mihomo')
     directory.mkdir(mode=0o700, exist_ok=True)
     config_path = directory / 'config.yaml'
     fd = os.open(str(config_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'w', encoding='utf-8') as stream:
-        json.dump(auth_config(secret, resolver), stream)
+        config = auth_config(secret)
+        if pins is not None:
+            from dns_pins import pinned_auth_config
+            config = pinned_auth_config(config, pins)
+        json.dump(config, stream)
     argv = [MIHOMO, '-d', str(directory), '-f', str(config_path)]
     validation = subprocess.run(argv + ['-t'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL, timeout=15, check=False)
@@ -179,6 +201,11 @@ def run_socks():
     child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         while not stopping and child.poll() is None:
+            try:
+                if read_dns_pins() != pins:
+                    return 4
+            except Exception:
+                return 4  # Expiry/drift closes this test listener and its connections.
             if not probe_socks(1081):
                 return 3  # Never keep an accepting auth proxy on a stale/dead namespace.
             time.sleep(1)
@@ -195,7 +222,8 @@ def run_socks():
 
 def main():
     if sys.argv[1:] == ['engine']:
-        argv = engine_argv(read_dns_contract())
+        read_dns_pins()  # Reject the old DNS mode; never enable a second lookup.
+        argv = engine_argv()
         os.execv(argv[0], argv)
     if sys.argv[1:] == ['socks']:
         try:

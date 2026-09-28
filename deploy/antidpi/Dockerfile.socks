@@ -6,6 +6,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY --from=mihomo /mihomo /usr/local/bin/mihomo
 COPY .artifacts/MIHOMO-LICENSE /usr/share/licenses/mihomo/LICENSE
-COPY runtime.py healthcheck.py /app/
+COPY runtime.py healthcheck.py dns_pins.py /app/
 USER 10002:10002
 ENTRYPOINT ["python3", "-B", "/app/runtime.py", "socks"]

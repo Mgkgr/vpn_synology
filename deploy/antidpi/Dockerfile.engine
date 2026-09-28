@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY .artifacts/ciadpi-x86_64 /usr/local/bin/ciadpi
 COPY .artifacts/LICENSE /usr/share/licenses/byedpi/LICENSE
-COPY runtime.py healthcheck.py /app/
+COPY runtime.py healthcheck.py dns_pins.py /app/
 RUN chmod 0555 /usr/local/bin/ciadpi
 USER 10002:10002
 ENTRYPOINT ["python3", "-B", "/app/runtime.py", "engine"]

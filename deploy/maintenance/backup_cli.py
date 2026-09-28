@@ -53,7 +53,7 @@ def load_backup_manifest(private, *, check_live_schema=True):
                 raise BackupError('revision_projection_required')
             for table in tables:
                 if (not isinstance(table, dict) or set(table) != {'table', 'columns'} or not SQL_NAME.fullmatch(table['table'])
-                        or not isinstance(table['columns'], list) or not 1 <= len(table['columns']) <= 64
+                        or not isinstance(table['columns'], list) or not 1 <= len(table['columns']) <= 256
                         or any(not isinstance(c, str) or not SQL_NAME.fullmatch(c) for c in table['columns'])):
                     raise BackupError('invalid_revision_projection')
         value['_sources'] = tuple(sources.values())

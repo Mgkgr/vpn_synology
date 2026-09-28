@@ -3,6 +3,7 @@
 !Dockerfile.socks
 !runtime.py
 !healthcheck.py
+!dns_pins.py
 !.artifacts
 !.artifacts/ciadpi-x86_64
 !.artifacts/LICENSE
