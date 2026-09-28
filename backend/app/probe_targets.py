@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import ProbeTarget
+from app.maintenance_client import mark_mutation
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +139,7 @@ class ProbeTargetService:
         current = {item.key for item in self.list_targets()}
         if set(requested) != current or any(not isinstance(value, bool) for value in requested.values()):
             raise ValueError("probe target selection is invalid")
+        mark_mutation()
         with self._session_factory.begin() as session:
             rows = {row.key: row for row in session.scalars(select(ProbeTarget)).all()}
             for item in APPROVED_PROBE_TARGETS:
@@ -162,6 +164,7 @@ class ProbeTargetService:
     def create_custom_target(self, *, label: str, url: str) -> ProbeTargetState:
         normalized_label = _normalized_label(label)
         normalized_url = self._normalize_custom_url(url)
+        mark_mutation()
         with self._session_factory.begin() as session:
             largest_position = session.scalar(select(ProbeTarget.position).order_by(ProbeTarget.position.desc()).limit(1))
             row = ProbeTarget(
@@ -184,6 +187,7 @@ class ProbeTargetService:
             row = session.get(ProbeTarget, key)
             if row is None or not row.key.startswith(_CUSTOM_PREFIX):
                 raise KeyError(key)
+            mark_mutation()
             row.label = normalized_label
             row.url = normalized_url
             row.enabled = enabled
@@ -197,6 +201,7 @@ class ProbeTargetService:
             row = session.get(ProbeTarget, key)
             if row is None or not row.key.startswith(_CUSTOM_PREFIX):
                 raise KeyError(key)
+            mark_mutation()
             session.delete(row)
 
     def _normalize_custom_url(self, value: str) -> str:

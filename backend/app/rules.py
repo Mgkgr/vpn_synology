@@ -19,6 +19,7 @@ from typing import Protocol, TypeVar
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import AuditEvent
+from app.maintenance_client import acquire_thread_lock, guarded_write, mark_mutation
 
 
 class DirectRuleValidationError(ValueError):
@@ -74,6 +75,7 @@ class RuleService:
         *,
         audit_session_factory: sessionmaker[Session] | None = None,
         now: Callable[[], datetime] | None = None,
+        maintenance_client=None,
     ) -> None:
         if mihomo is None:
             raise ValueError("a Mihomo reload client is required")
@@ -83,6 +85,7 @@ class RuleService:
         self._audit_session_factory = audit_session_factory
         self._now = now or (lambda: datetime.now(UTC))
         self._apply_lock = _rule_file_lock(self._direct_rules_path)
+        self._maintenance_client = maintenance_client
 
     def preview_direct_rules(self, text: str) -> DirectRulesPreview:
         """Return only strict DIRECT-provider forms, preserving harmless comments and blanks."""
@@ -127,6 +130,8 @@ class RuleService:
         an event loop at import time or from a running loop.
         """
 
+        if self._maintenance_client is not None and self._maintenance_client.enabled:
+            return _run_awaitable(self.apply_direct_rules_async(text, actor))
         with self._apply_lock:  # type: ignore[union-attr]
             prepared = self._prepare_apply(text, actor)
             try:
@@ -139,10 +144,11 @@ class RuleService:
             self._audit_success(prepared)
             return prepared.revision
 
+    @guarded_write("rules")
     async def apply_direct_rules_async(self, text: str, actor: str) -> RuleRevision:
         """Async counterpart used with the native asynchronous Mihomo client."""
 
-        await asyncio.to_thread(self._apply_lock.acquire)  # type: ignore[union-attr]
+        await acquire_thread_lock(self._apply_lock)
         try:
             prepared = self._prepare_apply(text, actor)
             try:
@@ -163,6 +169,7 @@ class RuleService:
         content = preview.text.encode("utf-8")
         existed = self._direct_rules_path.exists()
         previous = self._direct_rules_path.read_bytes() if existed else b""
+        mark_mutation()
         revision = self._write_revision(content)
         _atomic_replace(self._direct_rules_path, content)
         return _PreparedApply(revision, normalized_actor, previous, existed, content)

@@ -32,6 +32,7 @@ from app.models import (
 )
 from app.settings import DELAY_TEST_URLS
 from app.probe_targets import validate_approved_probe_urls
+from app.maintenance_client import guarded_write, mark_mutation, MaintenanceUnavailable
 
 RAW_SNAPSHOT_RETENTION = timedelta(days=90)
 HOURLY_RETENTION_MONTHS = 12
@@ -390,6 +391,7 @@ class Collector:
         clock: Callable[[], datetime] | None = None,
         now: Callable[[], datetime] | None = None,
         files: GeoFileStore | None = None,
+        maintenance_client=None,
     ) -> None:
         if clock is not None and now is not None:
             raise ValueError("provide either clock or now")
@@ -405,6 +407,7 @@ class Collector:
         self._geo_upgrade_lock = asyncio.Lock()
         self._clock = clock or now or (lambda: datetime.now(UTC))
         self._files = files or LocalGeoFileStore()
+        self._maintenance_client = maintenance_client
 
     async def run_minute(self) -> None:
         """Collect peer counters, HTTP service status and the selected fallback exit."""
@@ -659,6 +662,7 @@ class Collector:
         await self._geo_upgrade("scheduler", source="catchup")
         return True
 
+    @guarded_write("geodata")
     async def _geo_upgrade(self, actor: str, *, source: str) -> int:
         """Serialize manual and scheduled upgrades to keep their audit trail unambiguous."""
 
@@ -683,11 +687,12 @@ class Collector:
                 self._store_geo_metadata(session, update_id, "before", before)
 
             try:
+                mark_mutation()
                 result = await _await_result(self._mihomo.geo_upgrade())
                 succeeded = True
                 status_code = result.status_code
                 error_text = before_error
-            except BaseException as error:
+            except Exception as error:
                 succeeded = False
                 error_text, status_code = _safe_mihomo_error(error, "Geo upgrade failed")
 
@@ -713,6 +718,10 @@ class Collector:
                         detail=None,
                     )
                 )
+            if not succeeded and self._maintenance_client is not None and self._maintenance_client.enabled:
+                # A failed/timed-out controller write may still be in flight.
+                # Do not release the maintenance lock as a proven clean write.
+                raise MaintenanceUnavailable()
             return update_id
 
     async def _collect_peers(self, observed_at: datetime) -> None:

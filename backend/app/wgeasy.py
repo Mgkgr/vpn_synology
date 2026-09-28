@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import AuditEvent, WgEasyCredential
 from app.settings import Settings
+from app.maintenance_client import guarded_write, mark_mutation
 
 
 class WgEasyIntegrationError(RuntimeError):
@@ -162,12 +163,14 @@ class WgEasyAdapter:
         audit_session_factory: sessionmaker[Session] | None = None,
         timeout: float = 15.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        maintenance_client=None,
     ) -> None:
         self._base_url = _validated_base_url(str(settings.wgeasy_url))
         self._credential_vault = credential_vault
         self._audit_session_factory = audit_session_factory
         self._timeout = timeout
         self._transport = transport
+        self._maintenance_client = maintenance_client
 
     async def verify_contract(self) -> ContractStatus:
         """Fetch and validate the entire client-list shape without exposing vendor JSON."""
@@ -184,6 +187,7 @@ class WgEasyAdapter:
 
         return self._credential_vault is not None and self._credential_vault.is_configured()
 
+    @guarded_write("dashboard_config")
     async def configure_credentials(self, username: str, password: str) -> None:
         """Verify a candidate pair against the pinned list contract before replacing stored credentials."""
 
@@ -203,6 +207,7 @@ class WgEasyAdapter:
             self._audit_credentials_configured(succeeded=False)
             raise WgEasyIntegrationError("configure_credentials", "wg-easy credentials are unavailable") from error
 
+        mark_mutation()
         self._credential_vault.store(candidate.username, candidate.password)
         self._audit_credentials_configured(succeeded=True)
 
@@ -214,6 +219,7 @@ class WgEasyAdapter:
         except ValueError as error:
             raise WgEasyIntegrationError("list_clients", "invalid client-list response") from error
 
+    @guarded_write("clients")
     async def create_client(self, name: str) -> WireGuardClient:
         """Create a profile and confirm it from the authoritative client list.
 
@@ -227,6 +233,7 @@ class WgEasyAdapter:
             normalized_name = _required_text(name)
         except (TypeError, ValueError) as error:
             raise WgEasyIntegrationError("create_client", "invalid client name") from error
+        mark_mutation()
         response = await self._request(
             "create_client",
             "POST",
@@ -272,10 +279,12 @@ class WgEasyAdapter:
                 return candidates[0]
         return None
 
+    @guarded_write("clients")
     async def disable_client(self, client_id: int) -> ProfileMutationResult:
         """Disable a profile after re-verifying the list contract immediately before the write."""
 
         client_id, client = await self._guarded_client(client_id)
+        mark_mutation()
         await self._request("disable_client", "POST", self._client_path(client_id, "/disable"))
         updated = next((item for item in await self.list_clients() if item.id == client_id), None)
         if updated is None or updated.enabled:
@@ -283,10 +292,12 @@ class WgEasyAdapter:
         self._audit("profile_disable", client_id, client.name)
         return ProfileMutationResult(client_id, client.name, "disable")
 
+    @guarded_write("clients")
     async def enable_client(self, client_id: int) -> ProfileMutationResult:
         """Enable a profile and verify the enabled bit after the upstream write."""
 
         client_id, client = await self._guarded_client(client_id)
+        mark_mutation()
         await self._request("enable_client", "POST", self._client_path(client_id, "/enable"))
         updated = next((item for item in await self.list_clients() if item.id == client_id), None)
         if updated is None or not updated.enabled:
@@ -294,6 +305,7 @@ class WgEasyAdapter:
         self._audit("profile_enable", client_id, client.name)
         return ProfileMutationResult(client_id, client.name, "enable")
 
+    @guarded_write("clients")
     async def rename_client(self, client_id: int, name: str) -> ProfileMutationResult:
         """Rename using the documented v15 full update route and verify it."""
 
@@ -304,6 +316,7 @@ class WgEasyAdapter:
             raise WgEasyIntegrationError("rename_client", "invalid client name") from error
         raw_client = await self._json("rename_client", "GET", self._client_path(client_id))
         payload = _client_update_payload(raw_client, normalized_name)
+        mark_mutation()
         await self._request("rename_client", "POST", self._client_path(client_id), json_body=payload)
         updated = next((item for item in await self.list_clients() if item.id == client_id), None)
         if updated is None or updated.name != normalized_name:
@@ -311,10 +324,12 @@ class WgEasyAdapter:
         self._audit("profile_rename", client_id, normalized_name)
         return ProfileMutationResult(client_id, client.name, "rename")
 
+    @guarded_write("clients")
     async def delete_client(self, client_id: int) -> ProfileMutationResult:
         """Delete a profile after re-verifying the list contract immediately before the write."""
 
         client_id, client = await self._guarded_client(client_id)
+        mark_mutation()
         await self._request("delete_client", "DELETE", self._client_path(client_id))
         if any(item.id == client_id for item in await self.list_clients()):
             raise WgEasyIntegrationError("delete_client", "deleted client is still present in the client list")

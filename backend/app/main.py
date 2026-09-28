@@ -20,6 +20,8 @@ from app.db import create_all, create_session_factory, create_sqlite_engine
 from app.mihomo import MihomoClient
 from app.health_collector import HealthCollector, register_health_jobs
 from app.health_api import build_health_router
+from app.maintenance_api import build_maintenance_router, install_maintenance_handlers
+from app.maintenance_client import MaintenanceClient
 from app.kuma_push import KumaPublisher, KumaPushClient, load_push_tokens, register_kuma_jobs
 from app.outbound_health import HealthService
 from app.outbounds import build_outbound_registry
@@ -56,6 +58,7 @@ def create_collector_runtime(settings: Settings | None = None) -> CollectorRunti
     session_factory = create_session_factory(engine)
     encryption_key = settings.dashboard_encryption_key
     vault = WgEasyCredentialVault(session_factory, encryption_key.get_secret_value())
+    maintenance = MaintenanceClient(enabled=settings.maintenance_enabled)
     mihomo_secret = settings.mihomo_api_secret.get_secret_value() if settings.mihomo_api_secret is not None else None
     probe_targets = ProbeTargetService(session_factory)
     mihomo = MihomoClient(
@@ -64,7 +67,7 @@ def create_collector_runtime(settings: Settings | None = None) -> CollectorRunti
         delay_test_host_allowlist=settings.delay_test_host_allowlist,
         delay_test_host_supplier=probe_targets.enabled_hosts,
     )
-    wgeasy = WgEasyAdapter(settings, credential_vault=vault, audit_session_factory=session_factory)
+    wgeasy = WgEasyAdapter(settings, credential_vault=vault, audit_session_factory=session_factory, maintenance_client=maintenance)
     collector = Collector(
         session_factory,
         wgeasy=wgeasy,
@@ -79,6 +82,7 @@ def create_collector_runtime(settings: Settings | None = None) -> CollectorRunti
         geodata_dir=settings.geodata_dir,
         probe_urls=settings.delay_test_urls,
         probe_url_supplier=probe_targets.enabled_urls,
+        maintenance_client=maintenance,
     )
     container = RuntimeContainer(
         session_factory=session_factory,
@@ -88,14 +92,16 @@ def create_collector_runtime(settings: Settings | None = None) -> CollectorRunti
             settings.direct_rules_path,
             mihomo=mihomo,
             audit_session_factory=session_factory,
+            maintenance_client=maintenance,
         ),
         collector=collector,
         csrf_encryption_key=encryption_key.get_secret_value(),
         probe_targets=probe_targets,
-        policy_rule_service=ManagedRuleService(settings.direct_rules_path.parent, mihomo, session_factory),
+        policy_rule_service=ManagedRuleService(settings.direct_rules_path.parent, mihomo, session_factory, maintenance_client=maintenance),
         login_throttle=LoginThrottle(session_factory),
         trusted_proxy_networks=tuple(ip_network(item) for item in settings.trusted_proxy_cidrs),
         max_request_body_bytes=settings.max_request_body_bytes,
+        maintenance_client=maintenance,
     )
     health = HealthService(session_factory, build_outbound_registry(settings.antidpi_engine))
     container.outbound_health = health
@@ -219,6 +225,8 @@ def create_app(
 
     application.include_router(build_api_router())
     application.include_router(build_health_router())
+    application.include_router(build_maintenance_router())
+    install_maintenance_handlers(application)
 
     @application.get("/{path:path}", include_in_schema=False)
     async def serve_spa(path: str) -> FileResponse:

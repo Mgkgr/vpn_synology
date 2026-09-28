@@ -31,6 +31,39 @@ class UtcDateTime(TypeDecorator[datetime]):
         return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
 
 
+class MaintenanceGrant(Base):
+    """A hashed owner step-up, bound to one session and canonical operation."""
+
+    __tablename__ = "maintenance_grants"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("dashboard_sessions.id", ondelete="CASCADE"), index=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    consumed_job_id: Mapped[str | None] = mapped_column(String(32))
+
+
+class MaintenanceStepUpThrottle(Base):
+    __tablename__ = "maintenance_stepup_throttles"
+    session_id: Mapped[int] = mapped_column(ForeignKey("dashboard_sessions.id", ondelete="CASCADE"), primary_key=True)
+    failures: Mapped[int] = mapped_column(Integer, nullable=False)
+    window_started_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    blocked_until: Mapped[datetime | None] = mapped_column(UtcDateTime())
+
+
+class MaintenanceSubmitIntent(Base):
+    """Persist before IPC; an uncertain request is queried, never resubmitted."""
+
+    __tablename__ = "maintenance_submit_intents"
+    job_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    operation_kind: Mapped[str] = mapped_column(String(16), primary_key=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    session_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+
+
 class PeerSnapshotRecord(Base):
     __tablename__ = "peer_snapshots"
     __table_args__ = (

@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import AuditEvent, ManagedRulePolicy
+from app.maintenance_client import acquire_thread_lock, guarded_write, mark_mutation
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,21 +200,23 @@ class PolicyRule:
 class ManagedRuleService:
     """Atomically rewrite action-specific provider files then reload Mihomo."""
 
-    def __init__(self, rules_dir: Path, mihomo: Any, session_factory: sessionmaker[Session]) -> None:
+    def __init__(self, rules_dir: Path, mihomo: Any, session_factory: sessionmaker[Session], *, maintenance_client=None) -> None:
         self._rules_dir = Path(rules_dir)
         self._mihomo = mihomo
         self._session_factory = session_factory
         self._lock = _lock_for(self._rules_dir)
+        self._maintenance_client = maintenance_client
 
     def list_policies(self) -> list[PolicyRule]:
         with self._session_factory() as session:
             rows = session.scalars(select(ManagedRulePolicy).order_by(ManagedRulePolicy.id)).all()
         return [_to_policy(row) for row in rows]
 
+    @guarded_write("rules")
     async def ensure_default_openai_fallback(self) -> bool:
         """Create the safe OpenAI default once, never overriding an admin rule."""
 
-        await asyncio.to_thread(self._lock.acquire)
+        await acquire_thread_lock(self._lock)
         policy_id: int | None = None
         try:
             with self._session_factory.begin() as session:
@@ -225,6 +228,7 @@ class ManagedRuleService:
                 )
                 if existing is not None:
                     return False
+                mark_mutation()
                 now = datetime.now(UTC)
                 row = ManagedRulePolicy(
                     kind="GEOSITE",
@@ -269,11 +273,12 @@ class ManagedRuleService:
         finally:
             self._lock.release()
 
+    @guarded_write("rules")
     async def create(self, *, kind: str, category: str, action: str, enabled: bool) -> PolicyRule:
         kind, category, action = _validate(kind, category, action)
         if not isinstance(enabled, bool):
             raise ManagedRuleValidationError("enabled must be boolean")
-        await asyncio.to_thread(self._lock.acquire)
+        await acquire_thread_lock(self._lock)
         try:
             now = datetime.now(UTC)
             with self._session_factory.begin() as session:
@@ -288,6 +293,7 @@ class ManagedRuleService:
                 # create, rather than writing a duplicate provider rule.
                 if existing is not None:
                     return _to_policy(existing)
+                mark_mutation()
                 row = ManagedRulePolicy(kind=kind, category=category, action=action, enabled=enabled, created_at=now, updated_at=now)
                 session.add(row)
                 session.flush()
@@ -304,16 +310,18 @@ class ManagedRuleService:
         finally:
             self._lock.release()
 
+    @guarded_write("rules")
     async def update(self, policy_id: int, *, kind: str, category: str, action: str, enabled: bool) -> PolicyRule:
         kind, category, action = _validate(kind, category, action)
         if not isinstance(enabled, bool):
             raise ManagedRuleValidationError("enabled must be boolean")
-        await asyncio.to_thread(self._lock.acquire)
+        await acquire_thread_lock(self._lock)
         try:
             with self._session_factory.begin() as session:
                 row = session.get(ManagedRulePolicy, policy_id)
                 if row is None:
                     raise KeyError(policy_id)
+                mark_mutation()
                 previous = (row.kind, row.category, row.action, row.enabled, row.updated_at)
                 row.kind, row.category, row.action, row.enabled = kind, category, action, enabled
                 row.updated_at = datetime.now(UTC)
@@ -329,13 +337,15 @@ class ManagedRuleService:
         finally:
             self._lock.release()
 
+    @guarded_write("rules")
     async def delete(self, policy_id: int) -> None:
-        await asyncio.to_thread(self._lock.acquire)
+        await acquire_thread_lock(self._lock)
         try:
             with self._session_factory.begin() as session:
                 row = session.get(ManagedRulePolicy, policy_id)
                 if row is None:
                     raise KeyError(policy_id)
+                mark_mutation()
                 previous = (row.id, row.kind, row.category, row.action, row.enabled, row.created_at, row.updated_at)
                 session.delete(row)
             try:

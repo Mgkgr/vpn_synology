@@ -33,6 +33,7 @@ from app.policy_rules import (
     ManagedRuleValidationError,
 )
 from app.rules import DirectRuleValidationError
+from app.maintenance_client import MaintenanceBusy, MaintenanceClient, MaintenanceConflict, MaintenanceUnavailable
 from app.schemas import (
     AuthSessionResponse,
     BootstrapRequest,
@@ -106,6 +107,7 @@ class RuntimeContainer:
     outbound_health: Any | None = None
     outbound_health_enabled: bool = False
     kuma_publisher: Any | None = None
+    maintenance_client: Any | None = None
 
 
 def build_api_router() -> APIRouter:
@@ -115,7 +117,8 @@ def build_api_router() -> APIRouter:
     async def bootstrap(payload: BootstrapRequest, response: Response, request: Request) -> AuthSessionResponse:
         auth = get_auth_service(request)
         try:
-            issued = auth.bootstrap(payload.username, payload.password)
+            async with _maintenance(request).write_guard("dashboard_config", track_mutations=True):
+                issued = auth.bootstrap(payload.username, payload.password)
         except BootstrapUnavailable as error:
             raise HTTPException(status.HTTP_409_CONFLICT, "bootstrap is unavailable") from error
         except ValueError as error:
@@ -174,7 +177,8 @@ def build_api_router() -> APIRouter:
     ) -> DashboardAdminResponse:
         _require_csrf(request, principal)
         try:
-            created = get_auth_service(request).create_administrator(principal.username, payload.username, payload.password)
+            async with _maintenance(request).write_guard("dashboard_config", track_mutations=True):
+                created = get_auth_service(request).create_administrator(principal.username, payload.username, payload.password)
         except ValueError as error:
             raise HTTPException(status.HTTP_409_CONFLICT, "administrator cannot be created") from error
         return DashboardAdminResponse(username=created.username, bootstrap_owner=created.bootstrap_owner)
@@ -186,7 +190,8 @@ def build_api_router() -> APIRouter:
         principal: AuthenticatedSession = Depends(require_admin),
     ) -> Response:
         _require_csrf(request, principal)
-        get_auth_service(request).revoke_actor_sessions(principal.username, payload.username)
+        async with _maintenance(request).write_guard("dashboard_config", track_mutations=True):
+            get_auth_service(request).revoke_actor_sessions(principal.username, payload.username)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @router.get("/overview", response_model=OverviewResponse)
@@ -197,7 +202,7 @@ def build_api_router() -> APIRouter:
             version = await runtime.mihomo.version()
             groups = await runtime.mihomo.groups()
         except Exception as error:
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         service_states, stored_fallback = _load_observability_state(runtime)
         traffic = _load_latest_gateway_traffic(runtime)
         fallback = FallbackStateResponse(selected=_selected_fallback_from_groups(groups) or stored_fallback.selected)
@@ -222,7 +227,7 @@ def build_api_router() -> APIRouter:
         try:
             groups = await runtime.mihomo.groups()
         except Exception as error:
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         service_states, stored_fallback = _load_observability_state(runtime)
         del service_states
         # Controller state is live; the stored sample is only a safe fallback
@@ -250,7 +255,7 @@ def build_api_router() -> APIRouter:
         try:
             clients = await _runtime(request).wgeasy.list_clients()
         except Exception as error:
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         return [_client_response(client) for client in clients]
 
     @router.get("/wgeasy/credentials/status", response_model=WgEasyCredentialStatusResponse)
@@ -270,7 +275,7 @@ def build_api_router() -> APIRouter:
         try:
             await _runtime(request).wgeasy.configure_credentials(payload.username, payload.password)
         except Exception as error:
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         return WgEasyCredentialStatusResponse(configured=True)
 
     @router.post("/clients", response_model=ClientResponse, status_code=status.HTTP_201_CREATED)
@@ -285,7 +290,7 @@ def build_api_router() -> APIRouter:
             client = await runtime.wgeasy.create_client(payload.name)
         except Exception as error:
             _write_audit(runtime, principal.username, "client_create", succeeded=False, error_text=_safe_operation_reason(error))
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         _write_audit(runtime, principal.username, "client_create", succeeded=True, detail=_client_detail(client))
         return _client_response(client)
 
@@ -301,7 +306,7 @@ def build_api_router() -> APIRouter:
             result = await runtime.wgeasy.disable_client(client_id)
         except Exception as error:
             _write_audit(runtime, principal.username, "client_disable", succeeded=False, error_text=_safe_operation_reason(error))
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         _write_audit(runtime, principal.username, "client_disable", succeeded=True, detail=_mutation_detail(result))
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -317,7 +322,7 @@ def build_api_router() -> APIRouter:
             result = await runtime.wgeasy.enable_client(client_id)
         except Exception as error:
             _write_audit(runtime, principal.username, "client_enable", succeeded=False, error_text=_safe_operation_reason(error))
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         _write_audit(runtime, principal.username, "client_enable", succeeded=True, detail=_mutation_detail(result))
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -335,7 +340,7 @@ def build_api_router() -> APIRouter:
             client = next(item for item in await runtime.wgeasy.list_clients() if int(getattr(item, "id")) == client_id)
         except Exception as error:
             _write_audit(runtime, principal.username, "client_rename", succeeded=False, error_text=_safe_operation_reason(error))
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         _write_audit(runtime, principal.username, "client_rename", succeeded=True, detail=_mutation_detail(result, renamed_to=payload.name))
         return _client_response(client)
 
@@ -351,7 +356,7 @@ def build_api_router() -> APIRouter:
             result = await runtime.wgeasy.delete_client(client_id)
         except Exception as error:
             _write_audit(runtime, principal.username, "client_delete", succeeded=False, error_text=_safe_operation_reason(error))
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         _write_audit(runtime, principal.username, "client_delete", succeeded=True, detail=_mutation_detail(result))
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -371,7 +376,8 @@ def build_api_router() -> APIRouter:
         if len(requested) != len(payload.targets):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid probe target selection")
         try:
-            targets = _probe_target_service(request).set_enabled(requested)
+            async with _maintenance(request).write_guard("dashboard_config", track_mutations=True):
+                targets = _probe_target_service(request).set_enabled(requested)
         except ValueError as error:
             _write_audit(_runtime(request), principal.username, "probe_targets_update", succeeded=False)
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid probe target selection") from error
@@ -387,7 +393,8 @@ def build_api_router() -> APIRouter:
         _require_csrf(request, principal)
         runtime = _runtime(request)
         try:
-            target = _probe_target_service(request).create_custom_target(label=payload.label, url=payload.url)
+            async with _maintenance(request).write_guard("dashboard_config", track_mutations=True):
+                target = _probe_target_service(request).create_custom_target(label=payload.label, url=payload.url)
         except ValueError as error:
             _write_audit(runtime, principal.username, "probe_target_create", succeeded=False)
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "custom probe target is invalid") from error
@@ -404,9 +411,10 @@ def build_api_router() -> APIRouter:
         _require_csrf(request, principal)
         runtime = _runtime(request)
         try:
-            target = _probe_target_service(request).update_custom_target(
-                target_key, label=payload.label, url=payload.url, enabled=payload.enabled
-            )
+            async with _maintenance(request).write_guard("dashboard_config", track_mutations=True):
+                target = _probe_target_service(request).update_custom_target(
+                    target_key, label=payload.label, url=payload.url, enabled=payload.enabled
+                )
         except KeyError as error:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "custom probe target was not found") from error
         except ValueError as error:
@@ -424,7 +432,8 @@ def build_api_router() -> APIRouter:
         _require_csrf(request, principal)
         runtime = _runtime(request)
         try:
-            _probe_target_service(request).delete_custom_target(target_key)
+            async with _maintenance(request).write_guard("dashboard_config", track_mutations=True):
+                _probe_target_service(request).delete_custom_target(target_key)
         except KeyError as error:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "custom probe target was not found") from error
         except ValueError as error:
@@ -462,7 +471,7 @@ def build_api_router() -> APIRouter:
             diagnostic = await runtime.collector.diagnose_probe(payload.outbound, target.url)
         except Exception as error:
             _write_audit(runtime, principal.username, "probe_diagnose", succeeded=False)
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         _write_audit(
             runtime,
             principal.username,
@@ -494,14 +503,14 @@ def build_api_router() -> APIRouter:
         try:
             clients = await runtime.wgeasy.list_clients()
         except Exception as error:
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         profile = next((item for item in clients if str(getattr(item, "id", "")) == str(client_id)), None)
         if profile is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "client profile was not found")
         try:
             configuration = await runtime.wgeasy.config(client_id)
         except Exception as error:
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         filename = _configuration_filename(_safe_text(getattr(profile, "name", None)) or "wireguard")
         return Response(
             content=configuration,
@@ -522,7 +531,7 @@ def build_api_router() -> APIRouter:
         try:
             svg = await _runtime(request).wgeasy.qrcode(client_id)
         except Exception as error:
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         return Response(
             content=svg,
             media_type="image/svg+xml",
@@ -537,7 +546,7 @@ def build_api_router() -> APIRouter:
             providers = await runtime.mihomo.rule_providers()
             direct_text = await _await_if_needed(runtime.rule_service.read_direct_rules())
         except Exception as error:
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         if not isinstance(direct_text, str):
             raise _upstream_failure()
         policy_service = runtime.policy_rule_service
@@ -582,7 +591,7 @@ def build_api_router() -> APIRouter:
             _write_audit(runtime, principal.username, "direct_rules_validation_failed", succeeded=False)
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid direct rule") from error
         except Exception as error:
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         return DirectRuleApplyResponse(revision_number=revision.number, sha256=revision.sha256)
 
     @router.post("/rules/policies", response_model=ManagedRulePolicyResponse, status_code=status.HTTP_201_CREATED)
@@ -603,7 +612,7 @@ def build_api_router() -> APIRouter:
             raise HTTPException(status.HTTP_409_CONFLICT, "managed rule providers are not configured") from error
         except Exception as error:
             _write_audit(runtime, principal.username, "policy_rule_create", succeeded=False, error_text=_safe_operation_reason(error))
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         _write_audit(runtime, principal.username, "policy_rule_create", succeeded=True, detail=_policy_detail(policy))
         return _policy_response(policy)
 
@@ -628,7 +637,7 @@ def build_api_router() -> APIRouter:
             raise HTTPException(status.HTTP_409_CONFLICT, "managed rule providers are not configured") from error
         except Exception as error:
             _write_audit(runtime, principal.username, "policy_rule_update", succeeded=False, error_text=_safe_operation_reason(error))
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         _write_audit(runtime, principal.username, "policy_rule_update", succeeded=True, detail=_policy_detail(policy))
         return _policy_response(policy)
 
@@ -649,7 +658,7 @@ def build_api_router() -> APIRouter:
             raise HTTPException(status.HTTP_409_CONFLICT, "managed rule providers are not configured") from error
         except Exception as error:
             _write_audit(runtime, principal.username, "policy_rule_delete", succeeded=False, error_text=_safe_operation_reason(error))
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         _write_audit(runtime, principal.username, "policy_rule_delete", succeeded=True, detail=json.dumps({"policy_id": policy_id}, separators=(",", ":")))
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -724,7 +733,7 @@ def build_api_router() -> APIRouter:
             update_id = await runtime.collector.manual_geo_upgrade(principal.username)
         except Exception as error:
             _write_audit(runtime, principal.username, "geo_upgrade", succeeded=False)
-            raise _upstream_failure() from error
+            raise _upstream_failure(error) from error
         _write_audit(runtime, principal.username, "geo_upgrade", succeeded=True)
         if not isinstance(update_id, int):
             # Compatibility with constrained test and legacy collector adapters.
@@ -1474,7 +1483,13 @@ def _configuration_disposition(filename: str) -> str:
     return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"
 
 
-def _upstream_failure() -> HTTPException:
+def _maintenance(request: Request) -> MaintenanceClient:
+    return _runtime(request).maintenance_client or MaintenanceClient()
+
+
+def _upstream_failure(error: Exception | None = None) -> Exception:
+    if isinstance(error, (MaintenanceBusy, MaintenanceConflict, MaintenanceUnavailable)):
+        return error
     return HTTPException(status.HTTP_502_BAD_GATEWAY, "backend operation failed")
 
 

@@ -6,12 +6,41 @@ import os
 import re
 import stat
 from contextlib import asynccontextmanager, suppress
+from contextvars import ContextVar
+from functools import wraps
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 MAX_FRAME = 65536
 RESOURCES = frozenset(("rules", "geodata", "clients", "strategies", "dashboard_config"))
 DEFAULT_SOCKET = Path("/run/vpn-maintenance/control.sock")
+_mutation_progress: ContextVar[list[bool] | None] = ContextVar("maintenance_mutation_progress", default=None)
+
+
+def mark_mutation():
+    """Call immediately before the first persistent write/upstream mutation."""
+    progress = _mutation_progress.get()
+    if progress is not None:
+        progress[0] = True
+
+
+def guarded_write(resource: str):
+    def decorate(method):
+        @wraps(method)
+        async def guarded(self, *args, **kwargs):
+            client = getattr(self, "_maintenance_client", None)
+            if client is None:
+                return await method(self, *args, **kwargs)
+            async with client.write_guard(resource, track_mutations=True):
+                return await method(self, *args, **kwargs)
+        return guarded
+    return decorate
+
+
+async def acquire_thread_lock(lock):
+    # A cancelled to_thread(lock.acquire) can acquire later and orphan the lock.
+    while not lock.acquire(blocking=False):
+        await asyncio.sleep(0.05)
 
 
 class MaintenanceUnavailable(RuntimeError):
@@ -89,7 +118,7 @@ class MaintenanceClient:
         return await self.request("cancel", job_id=job_id, actor=actor)
 
     @asynccontextmanager
-    async def write_guard(self, resource: str):
+    async def write_guard(self, resource: str, *, track_mutations: bool = False):
         if resource not in RESOURCES:
             raise ValueError("unknown write resource")
         if not self.enabled:
@@ -102,6 +131,8 @@ class MaintenanceClient:
         owner = asyncio.current_task()
         lost = False
         complete = False
+        progress = [not track_mutations]
+        progress_token = _mutation_progress.set(progress)
 
         async def renew():
             nonlocal lost
@@ -116,6 +147,9 @@ class MaintenanceClient:
         renewal = asyncio.create_task(renew())
         try:
             yield
+            if lost:
+                owner.uncancel()
+                raise MaintenanceUnavailable()
             complete = True
         except asyncio.CancelledError:
             if lost:
@@ -123,11 +157,13 @@ class MaintenanceClient:
                 raise MaintenanceUnavailable() from None
             raise
         finally:
+            _mutation_progress.reset(progress_token)
             renewal.cancel()
             with suppress(asyncio.CancelledError):
                 await renewal
             if not lost:
                 # A partial/failed writer is reconciled, not optimistically unlocked.
-                released = await self.request("writer_release", lease_id=lease, outcome="complete" if complete else "uncertain")
-                if complete and (not isinstance(released, dict) or released.get("released") is not True):
+                clean = complete or not progress[0]
+                released = await self.request("writer_release", lease_id=lease, outcome="complete" if clean else "uncertain")
+                if clean and (not isinstance(released, dict) or released.get("released") is not True):
                     raise MaintenanceUnavailable()

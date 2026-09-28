@@ -68,3 +68,20 @@ def test_release_requiring_reconciliation_is_not_reported_clean():
             async with client.write_guard("rules"):
                 pass
     asyncio.run(check())
+
+
+def test_writer_cannot_swallow_lease_loss_and_report_success():
+    m = module()
+    async def transport(frame):
+        if frame["method"] == "writer_acquire":
+            return {"ok": True, "result": {"lease_id": JOB}}
+        raise TimeoutError()
+    async def check():
+        client = m.MaintenanceClient(enabled=True, transport=transport, renew_seconds=0.01)
+        with pytest.raises(m.MaintenanceUnavailable):
+            async with client.write_guard("geodata"):
+                try:
+                    await asyncio.sleep(1)
+                except asyncio.CancelledError:
+                    pass
+    asyncio.run(check())

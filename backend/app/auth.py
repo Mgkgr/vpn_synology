@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import AuditEvent, DashboardAdmin, DashboardOwner, DashboardSession, LoginThrottleRecord
+from app.maintenance_client import mark_mutation
 
 
 SESSION_COOKIE = "vpn_dashboard_session"
@@ -119,6 +120,7 @@ class AuthService:
                     password_hash=_PASSWORD_HASHER.hash(password),
                     created_at=now,
                 )
+                mark_mutation()
                 session.add(owner)
                 session.flush()
                 issued = self._create_session(session, owner, now, actor_username=owner.username)
@@ -162,6 +164,7 @@ class AuthService:
                 duplicate_admin = session.scalar(select(DashboardAdmin.id).where(DashboardAdmin.username == normalized_username))
                 if duplicate_owner is not None or duplicate_admin is not None:
                     raise ValueError("username is already in use")
+                mark_mutation()
                 session.add(
                     DashboardAdmin(
                         username=normalized_username,
@@ -217,6 +220,28 @@ class AuthService:
                 raise HTTPException(status.HTTP_401_UNAUTHORIZED, "authentication required")
             return token
 
+    @staticmethod
+    def owner_for_session(session: Session, principal: AuthenticatedSession, now: datetime) -> DashboardOwner | None:
+        """Check persisted actor identity, not the owner_id shared by all admins."""
+        record = session.get(DashboardSession, principal.session_id)
+        if record is None or record.expires_at <= now or record.owner_id != principal.owner_id:
+            return None
+        owner = session.get(DashboardOwner, record.owner_id)
+        if owner is None or principal.username != owner.username or (record.actor_username or owner.username) != owner.username:
+            return None
+        return owner
+
+    def is_owner(self, principal: AuthenticatedSession, now: datetime | None = None) -> bool:
+        with self._session_factory() as session:
+            return self.owner_for_session(session, principal, now or _now()) is not None
+
+    def verify_owner_password(self, principal: AuthenticatedSession, password: str, now: datetime | None = None) -> bool:
+        if not isinstance(password, str) or not 1 <= len(password) <= 1024:
+            return False
+        with self._session_factory() as session:
+            owner = self.owner_for_session(session, principal, now or _now())
+            return owner is not None and _verify_password(owner.password_hash, password)
+
     def verify_csrf(self, principal: AuthenticatedSession, submitted: str | None) -> bool:
         if not isinstance(submitted, str) or not submitted:
             return False
@@ -239,6 +264,7 @@ class AuthService:
         normalized_actor = _username(actor)
         normalized_username = _username(username)
         with self._session_factory.begin() as session:
+            mark_mutation()
             result = session.execute(delete(DashboardSession).where(DashboardSession.actor_username == normalized_username))
             _audit(session, actor=normalized_actor, action="sessions_revoke", succeeded=True)
             return result.rowcount or 0
