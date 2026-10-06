@@ -46,6 +46,60 @@ class PinnedAcceptanceTests(unittest.TestCase):
         self.assertEqual(self.m.acceptance_exit({'state':'success','mode':'offline'}), 0)
         self.assertEqual(self.m.acceptance_exit({'state':'failed','mode':'sites'}), 1)
 
+    def test_strategy_request_is_one_fixed_domain_and_never_automatic_application(self):
+        self.assertTrue(callable(getattr(self.m, 'parse_request', None)), 'strategy request validation is missing')
+        self.assertEqual(self.m.parse_request(['--approved', 'a'*32, 'strategies', 'discord.com']),
+                         ('a'*32, 'strategies', 'discord.com'))
+        self.assertEqual(self.m.parse_request(['--approved', 'a'*32, 'sites']), ('a'*32, 'sites', None))
+        for args in (['--approved', 'a'*32, 'strategies'],
+                     ['--approved', 'a'*32, 'strategies', '127.0.0.1'],
+                     ['--approved', 'a'*32, 'strategies', 'discord.com', '--apply']):
+            with self.assertRaises(ValueError):
+                self.m.parse_request(args)
+
+    def test_strategy_failure_or_incomplete_result_is_not_successful_acceptance(self):
+        self.assertEqual(self.m.acceptance_exit({'state':'success', 'mode':'strategies',
+                                                'matrix':{'stop_reason':'completed','accepted_candidates':[]}}), 2)
+        self.assertEqual(self.m.acceptance_exit({'state':'success', 'mode':'strategies',
+                                                'matrix':{'stop_reason':'time_limit','accepted_candidates':['split-1']}}), 2)
+        self.assertEqual(self.m.acceptance_exit({'state':'success', 'mode':'strategies',
+                                                'matrix':{'stop_reason':'completed','accepted_candidates':['split-1']}}), 0)
+
+    def test_strategy_dns_query_only_requests_the_chosen_service(self):
+        self.assertTrue(callable(getattr(self.m, 'dns_query', None)), 'scoped DNS query is missing')
+        for host in ('web.telegram.org', 'www.instagram.com'):
+            self.assertEqual(self.m.parse_request(['--approved','a'*32,'strategies',host])[-1], host)
+            source = self.m.dns_query((host,))
+            # Execute the query with a fake HTTP boundary; ensure no unrelated name is queried.
+            import sys
+            import types
+            from unittest.mock import patch
+            from urllib.parse import urlparse, parse_qs
+            observed = []
+            class Response:
+                def __enter__(self): return self
+                def __exit__(self, *args): pass
+                def read(self, size): return b'{"Answer":[]}'
+            class Opener:
+                def open(self, request, timeout):
+                    observed.append(parse_qs(urlparse(request.full_url).query)['name'][0])
+                    return Response()
+            settings = types.SimpleNamespace(mihomo_url='http://controller',
+                mihomo_api_secret=types.SimpleNamespace(get_secret_value=lambda: 'fixture-token'))
+            stub = types.SimpleNamespace(Settings=types.SimpleNamespace(from_env=lambda: settings))
+            with patch.dict(sys.modules, {'app.settings':stub}), \
+                    patch('urllib.request.build_opener', return_value=Opener()), patch('builtins.print'):
+                exec(source, {})
+            self.assertEqual(observed, [host])
+        with self.assertRaises(ValueError):
+            self.m.dns_query(('localhost',))
+
+    def test_confirmation_mode_retains_fixed_target_and_negative_exit_code(self):
+        self.assertEqual(self.m.parse_request(['--approved','a'*32,'confirm','www.instagram.com']),
+                         ('a'*32,'confirm','www.instagram.com'))
+        self.assertEqual(self.m.acceptance_exit({'state':'success','mode':'confirm',
+            'matrix':{'stop_reason':'completed','accepted_candidates':[]}}), 2)
+
 
 if __name__ == '__main__':
     unittest.main()

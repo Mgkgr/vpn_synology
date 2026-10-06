@@ -20,6 +20,7 @@ DOCKER = '/usr/local/bin/docker'
 STAGING = Path('/volume1/docker/vpn-gateway/.vless-maintenance')
 SCOPE = 'antidpi-pinned-acceptance'
 SITES = ('www.youtube.com', 'discord.com', 'www.wikipedia.org')
+STRATEGY_SITES = SITES + ('web.telegram.org', 'www.instagram.com')
 READ_LIMIT, ATTEMPTS = 32768, 3
 
 SOCKS_CLIENT = r'''
@@ -176,13 +177,20 @@ from app.settings import Settings
 settings = Settings.from_env()
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 result = {}
-for host in ('www.youtube.com','discord.com','www.wikipedia.org'):
+for host in PROBE_HOSTS:
     request = urllib.request.Request(str(settings.mihomo_url).rstrip('/') + '/dns/query?type=A&name=' + host,
         headers={'Authorization':'Bearer ' + settings.mihomo_api_secret.get_secret_value()})
     with opener.open(request, timeout=12) as response:
         result[host] = json.loads(response.read(32769))
 print(json.dumps(result))
 '''
+
+
+def dns_query(hosts):
+    if (not isinstance(hosts, tuple) or not 1 <= len(hosts) <= len(STRATEGY_SITES)
+            or len(set(hosts)) != len(hosts) or any(host not in STRATEGY_SITES for host in hosts)):
+        raise ValueError('invalid_dns_probe_hosts')
+    return 'PROBE_HOSTS = ' + repr(hosts) + '\n' + DNS_QUERY
 
 
 def engine_network_args(network):
@@ -209,10 +217,10 @@ def answer_ipv4(response):
     return sorted(result)
 
 
-def comparison_hosts(answers):
+def comparison_hosts(answers, hosts=SITES):
     # Native hosts chooses randomly from a list. Pin exactly the same A record
     # for both legs; different CDN addresses would invalidate the comparison.
-    return {host: [answers[host][0]] for host in SITES}
+    return {host: [answers[host][0]] for host in hosts}
 
 
 def acceptance_exit(report):
@@ -220,7 +228,22 @@ def acceptance_exit(report):
         return 1
     if report.get('mode') == 'sites' and report.get('site_acceptance') is not True:
         return 2
+    if report.get('mode') in ('strategies', 'confirm'):
+        matrix = report.get('matrix', {})
+        if matrix.get('stop_reason') != 'completed' or not matrix.get('accepted_candidates'):
+            return 2
     return 0
+
+
+def parse_request(args):
+    if (len(args) not in (3, 4) or args[0] != '--approved'
+            or not re.fullmatch(r'[a-f0-9]{32}', args[1])):
+        raise ValueError('invalid_request')
+    if len(args) == 3 and args[2] in ('offline', 'sites'):
+        return args[1], args[2], None
+    if len(args) == 4 and args[2] in ('strategies', 'confirm') and args[3] in STRATEGY_SITES:
+        return args[1], args[2], args[3]
+    raise ValueError('invalid_request')
 
 
 def load(name):
@@ -231,16 +254,16 @@ def load(name):
 
 
 def main():
-    if (len(sys.argv) != 4 or sys.argv[1] != '--approved' or not re.fullmatch(r'[a-f0-9]{32}', sys.argv[2])
-            or sys.argv[3] not in ('offline', 'sites') or os.geteuid() != 0):
-        raise SystemExit('Use --approved <reviewed-build-id> offline|sites in the root console.')
+    build_id, mode, target = parse_request(sys.argv[1:])
+    if os.geteuid() != 0:
+        raise SystemExit('Existing root console is required.')
     import fcntl
     lock = os.open('/var/run/vpn-antidpi-pinned-acceptance.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     builder, old_probe = load('build-antidpi-staging'), load('probe-antidpi-staging')
     command = builder.command
-    run_id, mode = uuid.uuid4().hex, sys.argv[3]
-    report = {'run_id': run_id, 'build_id': sys.argv[2], 'mode': mode, 'state': 'failed', 'stage': 'preflight',
+    run_id = uuid.uuid4().hex
+    report = {'run_id': run_id, 'build_id': build_id, 'mode': mode, 'state': 'failed', 'stage': 'preflight',
               'production_ready': False, 'checks': {}, 'cleanup': {}, 'observed_at': datetime.datetime.now(datetime.timezone.utc).isoformat()}
     created, removed, children = [], set(), []
     def snapshot():
@@ -275,7 +298,7 @@ def main():
             args = old_probe.create_args(run_id,role,image,owner)
             args[args.index('vpn.dashboard.scope=antidpi-offline-probe')] = 'vpn.dashboard.scope=' + SCOPE
             if role == 'engine':
-                args[args.index('--network')+1] = engine_network_args('bridge' if mode == 'sites' else 'none')[1]
+                args[args.index('--network')+1] = engine_network_args('none' if mode == 'offline' else 'bridge')[1]
             extras = ['--mount','type=bind,src='+str(secret)+',dst=/run/secrets/socks_password,readonly',
                       '--mount','type=bind,src='+str(pins_path)+',dst=/run/config/dns-pins.json,readonly']
             tail = []
@@ -303,83 +326,123 @@ def main():
             removed.add(container)
             report['cleanup'][container] = 'removed'
         try:
-            build = json.loads((STAGING / ('antidpi-build-'+sys.argv[2]+'.json')).read_text())
+            build = json.loads((STAGING / ('antidpi-build-'+build_id+'.json')).read_text())
             if (build.get('state')!='success' or not build.get('production_unchanged')
                     or build.get('context_sha256')!=builder.CONTEXT_SHA256):
                 raise ValueError('unaccepted_build')
             images = {r:build['images'][r]['verified']['id'] for r in ('engine','socks')}
             for image in images.values():
                 labels = json.loads(command([DOCKER,'image','inspect','--format','{{json .Config.Labels}}',image]))
-                if labels.get('vpn.dashboard.run')!=sys.argv[2] or labels.get('vpn.dashboard.scope')!='antidpi-staging':
+                if labels.get('vpn.dashboard.run')!=build_id or labels.get('vpn.dashboard.scope')!='antidpi-staging':
                     raise ValueError('test_image_identity_mismatch')
             hosts = {'www.youtube.com':['142.250.74.206']}
-            if mode == 'sites':
+            if mode in ('sites', 'strategies', 'confirm'):
                 report['stage'] = 'gateway_dns_snapshot'
-                dns = json.loads(command([DOCKER,'exec','vpn-dashboard','python','-B','-c',DNS_QUERY],timeout=50))
-                hosts = {host:answer_ipv4(dns[host]) for host in SITES}
+                requested_hosts = (target,) if target is not None else SITES
+                dns = json.loads(command([DOCKER,'exec','vpn-dashboard','python','-B','-c',dns_query(requested_hosts)],timeout=50))
+                hosts = {host:answer_ipv4(dns[host]) for host in requested_hosts}
                 if hashlib.sha256(Path('/volume1/docker/vpn-gateway/mihomo/config.yaml').read_bytes()).hexdigest()!=before['config_sha256']:
                     raise ValueError('gateway_dns_config_changed')
                 report['dns_addresses'] = hosts
-                hosts = comparison_hosts(hosts)
+                hosts = comparison_hosts(hosts, requested_hosts)
                 report['comparison_addresses'] = hosts
             private_file(secret,secrets.token_urlsafe(32))
-            pins = contract(hosts,600 if mode=='sites' else 120)
+            pins = contract(hosts,120 if mode=='offline' else 600)
             private_file(pins_path,json.dumps(pins))
             report['stage'] = 'start_test_runtime'
-            owner = create('engine',images['engine'],code=FIXTURE if mode=='offline' else None)
-            healthy(owner,'engine')
-            auth = create('socks',images['socks'],owner)
-            healthy(auth,'socks')
-            peer = create('peer',images['engine'],owner,code='import time; time.sleep(900)')
-            namespaces = []
-            for container in (owner,auth,peer):
-                pid = int(command([DOCKER,'inspect','--format','{{.State.Pid}}',container]))
-                namespaces.append(os.stat('/proc/{}/ns/net'.format(pid)).st_ino)
-            if len(set(namespaces))!=1 or namespaces[0]==os.stat('/proc/self/ns/net').st_ino:
-                raise RuntimeError('invalid_test_namespace')
-            report['namespace'] = namespaces[0]
-            if mode=='sites':
-                report['stage'] = 'bounded_https_probes'
-                print('ANTIDPI_STAGE=bounded_https_probes',flush=True)
-                output = command([DOCKER,'exec',peer,'python3','-B','-u','-c',SITE_CLIENT],timeout=550)
-                rows = [json.loads(line) for line in output.splitlines()]
-                if len(rows)!=18:
-                    raise RuntimeError('incomplete_site_measurements')
-                report['measurements'] = rows
-                report['site_acceptance'] = all(row['ok'] for row in rows if row['mode']=='byedpi')
+            if mode in ('strategies', 'confirm'):
+                strategies = load('antidpi-strategy-probe')
+                source = Path(strategies.__file__).read_text(encoding='utf-8')
+                candidates = ('tlsrec-sni',) if mode=='confirm' else tuple(strategies.CANDIDATES)
+                report['strategy_source_sha256'] = hashlib.sha256(source.encode('utf-8')).hexdigest()
+                report['candidate_options'] = {key:list(strategies.CANDIDATES[key]) for key in candidates}
+                report['runtime_states'] = []
+                def start_candidate(strategy):
+                    print('ANTIDPI_CANDIDATE='+strategy+'|HOST='+target,flush=True)
+                    argv = strategies.engine_argv(strategy)
+                    owner = create('engine',images['engine'],code='import os; os.execv('+repr(argv[0])+','+repr(argv)+')')
+                    healthy(owner,'engine')
+                    auth = create('socks',images['socks'],owner)
+                    healthy(auth,'socks')
+                    namespaces = [os.stat('/proc/{}/ns/net'.format(int(command(
+                        [DOCKER,'inspect','--format','{{.State.Pid}}',container])))).st_ino for container in (owner,auth)]
+                    if len(set(namespaces))!=1 or namespaces[0]==os.stat('/proc/self/ns/net').st_ino:
+                        raise RuntimeError('invalid_test_namespace')
+                    return owner,auth
+                def measure_candidate(handle, host, method):
+                    code = source+'\nimport json; print(json.dumps(probe_https('+repr(host)+','+repr(method)+')))\n'
+                    row = json.loads(command([DOCKER,'exec',handle[0],'python3','-B','-c',code],timeout=15))
+                    print('ANTIDPI_PROBE='+method+'|STAGE='+row['stage']+'|OK='+str(row['ok'])
+                          +'|MS='+str(row['elapsed_ms'])+'|STATUS='+str(row.get('status','-'))
+                          +'|ERROR='+row.get('error_type','-'),flush=True)
+                    return row
+                def stop_candidate(handle):
+                    for container in reversed(handle):
+                        state = json.loads(command([DOCKER,'inspect','--format','{{json .State}}',container]))
+                        report['runtime_states'].append({'oom_killed':state.get('OOMKilled',False),
+                            'running':state.get('Running',False),'exit_code':state.get('ExitCode')})
+                        stop_remove(container)
+                        if state.get('OOMKilled') or not state.get('Running'):
+                            raise RuntimeError('test_runtime_died')
+                report['stage'] = 'bounded_strategy_matrix'
+                report['matrix'] = strategies.run_matrix(target,start_candidate,measure_candidate,stop_candidate,
+                                                        candidates=candidates)
+                report['state'] = 'success'
             else:
-                for check in ('drift','expiry'):
-                    report['stage'] = 'native_hosts_' + check
-                    print('ANTIDPI_STAGE='+report['stage'],flush=True)
-                    if check=='expiry':
-                        stop_remove(auth)
-                        pins = contract(hosts,45)
-                        private_file(pins_path,json.dumps(pins))
-                        auth = create('socks',images['socks'],owner)
-                        healthy(auth,'socks')
-                    child = subprocess.Popen([DOCKER,'exec',peer,'python3','-B','-u','-c',OFFLINE_CLIENT],
-                        stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
-                    children.append(child)
-                    readable,_,_ = select.select([child.stdout],[],[],20)
-                    if not readable:
-                        raise RuntimeError('native_hosts_stream_timeout')
-                    ready = json.loads(child.stdout.readline())
-                    if ready.get('stage')!='stream_ready' or ready.get('bytes')!=262144:
-                        raise RuntimeError('native_hosts_echo_failed')
-                    if check=='drift':
-                        changed = dict(pins,source_revision='b'*64)
-                        private_file(pins_path,json.dumps(changed))
-                    output,_ = child.communicate(timeout=70)
-                    if child.returncode!=0 or json.loads(output).get('closed') is not True:
-                        raise RuntimeError('dns_guard_did_not_close_existing_stream')
-                    state = command([DOCKER,'inspect','--format','{{.State.Running}}|{{.State.ExitCode}}',auth]).strip()
-                    if state!='false|4':
-                        raise RuntimeError('dns_guard_supervisor_did_not_exit')
-                    report['checks'][check] = dict(ready,auth_exit=4,existing_stream_closed=True)
-                targets = [json.loads(line) for line in command([DOCKER,'exec',owner,'cat','/tmp/targets.jsonl']).splitlines()]
-                if len(targets)!=2 or any(t!={'atype':1,'target':'142.250.74.206','port':443} for t in targets):
-                    raise RuntimeError('second_dns_lookup_or_forbidden_destination')
-                report['checks']['native_socks_targets'] = targets
+                owner = create('engine',images['engine'],code=FIXTURE if mode=='offline' else None)
+                healthy(owner,'engine')
+                auth = create('socks',images['socks'],owner)
+                healthy(auth,'socks')
+                peer = create('peer',images['engine'],owner,code='import time; time.sleep(900)')
+                namespaces = []
+                for container in (owner,auth,peer):
+                    pid = int(command([DOCKER,'inspect','--format','{{.State.Pid}}',container]))
+                    namespaces.append(os.stat('/proc/{}/ns/net'.format(pid)).st_ino)
+                if len(set(namespaces))!=1 or namespaces[0]==os.stat('/proc/self/ns/net').st_ino:
+                    raise RuntimeError('invalid_test_namespace')
+                report['namespace'] = namespaces[0]
+                if mode=='sites':
+                    report['stage'] = 'bounded_https_probes'
+                    print('ANTIDPI_STAGE=bounded_https_probes',flush=True)
+                    output = command([DOCKER,'exec',peer,'python3','-B','-u','-c',SITE_CLIENT],timeout=550)
+                    rows = [json.loads(line) for line in output.splitlines()]
+                    if len(rows)!=18:
+                        raise RuntimeError('incomplete_site_measurements')
+                    report['measurements'] = rows
+                    report['site_acceptance'] = all(row['ok'] for row in rows if row['mode']=='byedpi')
+                else:
+                    for check in ('drift','expiry'):
+                        report['stage'] = 'native_hosts_' + check
+                        print('ANTIDPI_STAGE='+report['stage'],flush=True)
+                        if check=='expiry':
+                            stop_remove(auth)
+                            pins = contract(hosts,45)
+                            private_file(pins_path,json.dumps(pins))
+                            auth = create('socks',images['socks'],owner)
+                            healthy(auth,'socks')
+                        child = subprocess.Popen([DOCKER,'exec',peer,'python3','-B','-u','-c',OFFLINE_CLIENT],
+                            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+                        children.append(child)
+                        readable,_,_ = select.select([child.stdout],[],[],20)
+                        if not readable:
+                            raise RuntimeError('native_hosts_stream_timeout')
+                        ready = json.loads(child.stdout.readline())
+                        if ready.get('stage')!='stream_ready' or ready.get('bytes')!=262144:
+                            raise RuntimeError('native_hosts_echo_failed')
+                        if check=='drift':
+                            changed = dict(pins,source_revision='b'*64)
+                            private_file(pins_path,json.dumps(changed))
+                        output,_ = child.communicate(timeout=70)
+                        if child.returncode!=0 or json.loads(output).get('closed') is not True:
+                            raise RuntimeError('dns_guard_did_not_close_existing_stream')
+                        state = command([DOCKER,'inspect','--format','{{.State.Running}}|{{.State.ExitCode}}',auth]).strip()
+                        if state!='false|4':
+                            raise RuntimeError('dns_guard_supervisor_did_not_exit')
+                        report['checks'][check] = dict(ready,auth_exit=4,existing_stream_closed=True)
+                    targets = [json.loads(line) for line in command([DOCKER,'exec',owner,'cat','/tmp/targets.jsonl']).splitlines()]
+                    if len(targets)!=2 or any(t!={'atype':1,'target':'142.250.74.206','port':443} for t in targets):
+                        raise RuntimeError('second_dns_lookup_or_forbidden_destination')
+                    report['checks']['native_socks_targets'] = targets
             report['state'] = 'success'
         except Exception as error:
             report['error_type'] = type(error).__name__
@@ -412,6 +475,11 @@ def main():
             print('ANTIDPI_PINNED='+report['state'],flush=True)
             if mode == 'sites':
                 print('SITE_ACCEPTANCE=' + ('passed' if report.get('site_acceptance') is True else 'failed'),flush=True)
+            if mode in ('strategies', 'confirm'):
+                matrix = report.get('matrix', {})
+                print('STRATEGY_ACCEPTANCE=' + ('passed' if acceptance_exit(report)==0 else 'failed'),flush=True)
+                print('STRATEGY_STOP_REASON=' + matrix.get('stop_reason','runtime_error'),flush=True)
+                print('STRATEGY_CANDIDATES=' + ','.join(matrix.get('accepted_candidates',[])),flush=True)
             print('REPORT='+str(destination),flush=True)
     os.close(lock)
     return acceptance_exit(report)
