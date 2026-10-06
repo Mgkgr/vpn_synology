@@ -27,6 +27,13 @@ def test_rejects_a_non_lan_dashboard_bind() -> None:
         Settings(dashboard_bind="0.0.0.0:8080", **valid_values())
 
 
+def test_daily_site_probes_are_opt_in(monkeypatch):
+    monkeypatch.delenv("SITE_PROBES_ENABLED", raising=False)
+    assert Settings(**valid_values()).site_probes_enabled is False
+    monkeypatch.setenv("SITE_PROBES_ENABLED", "true")
+    assert Settings(**valid_values()).site_probes_enabled is True
+
+
 def test_accepts_the_localhost_reverse_proxy_bind() -> None:
     assert (
         Settings(dashboard_bind="127.0.0.1:8088", **valid_values()).dashboard_bind.endswith(":8088")

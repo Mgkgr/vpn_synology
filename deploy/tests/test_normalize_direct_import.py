@@ -52,6 +52,26 @@ def test_rejects_non_direct_or_invalid_import_rows_without_writing_output(tmp_pa
     assert text == ""
 
 
+def test_max_messenger_pack_imports_only_the_messenger_domain_roots(tmp_path: Path) -> None:
+    """Catch missing MAX API coverage or accidental routing of the whole VK group."""
+
+    output = tmp_path / "max-normalized.txt"
+    result = subprocess.run(
+        [sys.executable, str(NORMALIZER), str(REPOSITORY / "deploy" / "rules" / "max-messenger-direct.txt"), str(output)],
+        cwd=REPOSITORY, text=True, capture_output=True, check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert output.read_text(encoding="utf-8").splitlines() == [
+        "DOMAIN-SUFFIX,max.ru,DIRECT",
+        "DOMAIN-SUFFIX,oneme.ru,DIRECT",
+    ]
+    repeated, merged = normalize(output.read_text(encoding="utf-8") * 2, tmp_path)
+    assert repeated.returncode == 0, repeated.stderr
+    assert merged == output.read_text(encoding="utf-8")
+    assert "DUPLICATE_INPUT_RULES=2" in repeated.stdout
+
+
 def test_russian_commerce_and_delivery_pack_keeps_critical_mobile_service_roots(tmp_path: Path) -> None:
     """A pack regression must not silently send the affected mobile apps back to VPN."""
 

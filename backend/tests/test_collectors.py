@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.collectors import (
     Collector,
+    LocalGeoFileStore,
     PeerSnapshot,
     SnapshotOrderingError,
     YearMonth,
@@ -247,6 +248,29 @@ def make_collector(session_factory, *, wgeasy, mihomo, geodata_dir, now=None):
         geodata_dir=geodata_dir,
         now=now or (lambda: at("2026-07-13T12:00:00Z")),
     )
+
+
+def test_current_geo_metadata_preserves_readable_file_when_another_fails(tmp_path, monkeypatch) -> None:
+    directory = tmp_path / "geodata"
+    directory.mkdir()
+    (directory / "GeoSite.dat").write_bytes(b"site")
+    (directory / "GeoIP.dat").write_bytes(b"ip")
+    from app.collectors import _sha256_file
+
+    def hash_with_denied_ip(path):
+        if path.name == "GeoIP.dat":
+            raise PermissionError("private details")
+        return _sha256_file(path)
+
+    monkeypatch.setattr("app.collectors._sha256_file", hash_with_denied_ip)
+    collector = Collector(None, wgeasy=None, mihomo=None, service_probe=None, geodata_dir=directory)
+    files, error = collector.current_geo_metadata()
+    assert [item.filename for item in files] == ["GeoSite.dat"]
+    assert "GeoIP.dat" in error
+    assert "private details" not in error
+    # Transactional update verification remains strict when any file is unreadable.
+    with pytest.raises(OSError):
+        LocalGeoFileStore().metadata(directory)
 
 
 def test_minute_records_normalized_peers_services_and_fallback_state(tmp_path) -> None:

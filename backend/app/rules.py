@@ -26,6 +26,10 @@ class DirectRuleValidationError(ValueError):
     """Raised for a local rule that is outside the intentionally small allowlist."""
 
 
+class DirectRuleConflictError(ValueError):
+    """The editor's base is no longer the current DIRECT revision."""
+
+
 class MihomoReloadClient(Protocol):
     def reload(self) -> object: ...
 
@@ -145,11 +149,17 @@ class RuleService:
             return prepared.revision
 
     @guarded_write("rules")
-    async def apply_direct_rules_async(self, text: str, actor: str) -> RuleRevision:
+    async def apply_direct_rules_async(self, text: str, actor: str, *, expected_sha256: str | None = None) -> RuleRevision:
         """Async counterpart used with the native asynchronous Mihomo client."""
 
         await acquire_thread_lock(self._apply_lock)
         try:
+            if expected_sha256 is not None:
+                # Check while holding the same lock as write/reload, not only in
+                # the HTTP route: two administrators must not lose each other's edit.
+                current = hashlib.sha256(self.read_direct_rules().encode("utf-8")).hexdigest()
+                if current != expected_sha256:
+                    raise DirectRuleConflictError("DIRECT revision changed")
             prepared = self._prepare_apply(text, actor)
             try:
                 outcome = self._mihomo.reload()
@@ -249,6 +259,9 @@ class _PreparedApply:
 
 def _validate_rule_line(line: str, line_number: int) -> str:
     parts = [part.strip() for part in line.split(",")]
+    no_resolve = len(parts) == 4 and parts[0] in {"IP-CIDR", "GEOIP"} and parts[3] == "no-resolve"
+    if no_resolve:
+        parts = parts[:3]
     if len(parts) != 3 or parts[0] not in _ALLOWED_TYPES or parts[2] != "DIRECT":
         raise DirectRuleValidationError(f"rule line {line_number} is not an allowed terminal DIRECT rule")
     rule_type, payload, _action = parts
@@ -261,7 +274,7 @@ def _validate_rule_line(line: str, line_number: int) -> str:
         payload = _validated_cidr(payload, line_number)
     elif not _SAFE_TOKEN.fullmatch(payload):
         raise DirectRuleValidationError(f"rule line {line_number} has an invalid payload")
-    return f"{rule_type},{payload},DIRECT"
+    return f"{rule_type},{payload},DIRECT" + (",no-resolve" if no_resolve else "")
 
 
 def _validated_domain(value: str, line_number: int) -> str:

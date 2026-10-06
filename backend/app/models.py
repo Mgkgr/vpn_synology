@@ -31,6 +31,41 @@ class UtcDateTime(TypeDecorator[datetime]):
         return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
 
 
+class SiteProbeSchedule(Base):
+    """Retained watermark: pruning results must not enable clock-rollback replay."""
+    __tablename__ = "site_probe_schedule"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_site_probe_schedule_singleton"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    last_claimed_date: Mapped[str] = mapped_column(String(10), nullable=False)
+
+
+class SiteProbeRun(Base):
+    __tablename__ = "site_probe_runs"
+    __table_args__ = (CheckConstraint("state IN ('running','completed','interrupted')", name="ck_site_probe_run_state"),)
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+    expected_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class SiteProbeResult(Base):
+    __tablename__ = "site_probe_results"
+    __table_args__ = (
+        CheckConstraint("state IN ('responded','http_rejected','failed','unknown')", name="ck_site_probe_result_state"),
+        Index("ix_site_probe_result_service_route_day", "service_key", "route_id", "day"),
+    )
+    day: Mapped[str] = mapped_column(ForeignKey("site_probe_runs.day", ondelete="CASCADE"), primary_key=True)
+    service_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    route_id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    route_label: Mapped[str] = mapped_column(String(100), nullable=False)
+    url: Mapped[str] = mapped_column(String(255), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False)
+    delay_ms: Mapped[int | None] = mapped_column(Integer)
+    reason: Mapped[str | None] = mapped_column(String(48))
+
+
 class MaintenanceGrant(Base):
     """A hashed owner step-up, bound to one session and canonical operation."""
 

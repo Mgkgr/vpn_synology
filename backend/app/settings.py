@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     trusted_proxy_cidrs: tuple[str, ...] = ("172.24.0.0/16",)
     max_request_body_bytes: int = 65_536
     outbound_health_enabled: bool = False
+    site_probes_enabled: bool = False
     antidpi_engine: AntidpiEngine | None = None
     kuma_push_tokens_file: Path | None = None
     maintenance_enabled: bool = False

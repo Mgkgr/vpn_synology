@@ -173,9 +173,45 @@ export interface RuleProvider {
 export interface RulesResponse {
   rules: ControllerRule[]
   providers: RuleProvider[]
-  direct_text: string
+  direct_text: string | null
+  direct_sha256?: string | null
+  section_errors?: Record<string, string>
   policies?: ManagedRulePolicy[]
   policy_catalog?: ManagedRuleCategory[]
+}
+
+export interface ServiceProbeRoute {
+  route_id: 'direct' | 'primary' | 'reserve'
+  label: string
+  state: 'responded' | 'http_rejected' | 'failed' | 'unknown'
+  delay_ms: number | null
+  reason: string | null
+  observed_at: string | null
+  url: string
+  stale: boolean
+  current_run: boolean
+}
+
+export interface ServiceProbe {
+  key: string
+  category: string
+  url: string
+  routes: ServiceProbeRoute[]
+}
+
+export interface ServiceProbeResponse {
+  enabled: boolean
+  timezone: string
+  next_run_at: string | null
+  run: null | {
+    day: string
+    state: 'running' | 'completed' | 'interrupted'
+    started_at: string
+    completed_at: string | null
+    expected_count: number
+    completed_count: number
+  }
+  services: ServiceProbe[]
 }
 
 export type ManagedRuleAction = 'DIRECT' | 'VPS-FALLBACK' | 'WG-IMP' | 'HY2-USA'

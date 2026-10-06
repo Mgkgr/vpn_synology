@@ -1,0 +1,54 @@
+title = "VPN gateway publication checks"
+
+[extend]
+useDefault = true
+
+# Only the deterministic fixture key in these five tests is exempt. A different
+# value in the same test, or this value outside those tests, must still fail.
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Reviewed Fernet fixture: ASCII 0123456789abcdef repeated twice"
+condition = "AND"
+paths = ['''(?:^|/)backend/tests/test_(?:settings|wgeasy|maintenance_api|maintenance_writers|outbounds)\.py$''']
+regexes = ['''^(?:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=|0123456789abcdef0123456789abcdef)$''']
+
+[[rules]]
+id = "vpn-vless-uri"
+description = "VLESS subscription credential"
+regex = '''(?i)vless://([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\\?@'''
+secretGroup = 1
+keywords = ["vless"]
+
+[[rules.allowlists]]
+description = "Reviewed synthetic UUID in the isolated migration test"
+condition = "AND"
+paths = ['''(?:^|/)deploy/tests/test_replace_primary_vless\.py$''']
+regexes = ['''^11111111-2222-4333-8444-555555555555$''']
+
+[[rules]]
+id = "vpn-wireguard-key"
+description = "WireGuard private or preshared 32-byte key"
+regex = '''(?i)\b(?:private|preshared)[_-]?key["'\s]*[:=]\s*["']?([a-z0-9+/]{43}=)'''
+secretGroup = 1
+keywords = ["privatekey", "private_key", "private-key", "presharedkey", "preshared_key", "preshared-key"]
+
+[[rules]]
+id = "vpn-auth-uri"
+description = "Hysteria or Trojan subscription credential"
+regex = '''(?i)(?:hy2|hysteria2|trojan)://([a-z0-9._~%+/:-]{12,})\\?@'''
+secretGroup = 1
+keywords = ["hy2", "hysteria2", "trojan"]
+
+[[rules.allowlists]]
+description = "Reviewed clipboard-import fixture; not a working VPN credential"
+condition = "AND"
+paths = ['''(?:^|/)deploy/test-replace-hy2-profile\.ps1$''']
+regexes = ['''^fixture-password$''']
+
+[[rules.allowlists]]
+description = "Reviewed HY2 dummy password in the isolated migration test"
+condition = "AND"
+paths = ['''(?:^|/)deploy/tests/test_replace_primary_vless\.py$''']
+regexes = ['''^test-auth-secret$''']

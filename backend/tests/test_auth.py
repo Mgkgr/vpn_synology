@@ -341,6 +341,45 @@ def test_host_health_rejects_non_finite_or_malformed_metrics(client: TestClient,
     assert client.get("/api/host-health").status_code == 503
 
 
+def test_host_health_reports_missing_snapshot_without_exposing_host_paths(client: TestClient, tmp_path) -> None:
+    bootstrap(client)
+    (tmp_path / "host-health.json").unlink()
+
+    response = client.get("/api/host-health")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "host health snapshot is missing"}
+
+
+def test_host_health_distinguishes_invalid_snapshot_from_missing(client: TestClient, tmp_path) -> None:
+    bootstrap(client)
+    (tmp_path / "host-health.json").write_text("{", encoding="utf-8")
+
+    response = client.get("/api/host-health")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "host health snapshot is invalid"}
+
+
+def test_host_health_distinguishes_permission_failure(client: TestClient, tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    bootstrap(client)
+    original = Path.read_text
+
+    def read_text(path, *args, **kwargs):
+        if path == tmp_path / "host-health.json":
+            raise PermissionError("private host path")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+    response = client.get("/api/host-health")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "host health snapshot is not readable"}
+
+
 def test_dashboard_hides_openapi_and_never_caches_wireguard_secrets(client: TestClient) -> None:
     bootstrap(client)
 

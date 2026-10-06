@@ -12,6 +12,7 @@ import type {
   RealtimeTrafficResponse,
   RoutesResponse,
   RulesResponse,
+  ServiceProbeResponse,
   TrafficUsageResponse,
   UpdatesResponse,
   WgEasyCredentialStatus,
@@ -62,6 +63,8 @@ async function request<T>(path: string, init: RequestInit = {}, notifyUnauthoriz
       ? 'Требуется вход в панель.'
       : response.status === 403
         ? 'Сессия истекла. Войдите снова.'
+        : response.status === 409 && path === '/rules/apply'
+          ? 'Изменение DIRECT-списка отклонено: конфликт состояния или другая операция. Черновик сохранён; обновите сведения перед повтором.'
         : response.status === 503 && path === '/host-health'
           ? 'Снимок состояния NAS ещё не собран. Запустите задачу DSM «VPN Dashboard — host health». '
             + 'После первого запуска данные появятся в течение минуты.'
@@ -128,7 +131,8 @@ export const api = {
   }),
   deleteClient: (clientId: number) => request<void>(`/clients/${clientId}`, { method: 'DELETE' }),
   rules: () => request<RulesResponse>('/rules'),
-  applyDirectRules: (text: string) => request<DirectRulesResult>('/rules/apply', { method: 'POST', body: JSON.stringify({ text }) }),
+  siteProbes: () => request<ServiceProbeResponse>('/rules/service-checks', { signal: AbortSignal.timeout(8_000) }),
+  applyDirectRules: (text: string, expected_sha256?: string) => request<DirectRulesResult>('/rules/apply', { method: 'POST', body: JSON.stringify({ text, expected_sha256 }) }),
   createManagedRule: (payload: ManagedRuleInput) => request<ManagedRulePolicy>('/rules/policies', { method: 'POST', body: JSON.stringify(payload) }),
   updateManagedRule: (id: number, payload: ManagedRuleInput) => request<ManagedRulePolicy>(`/rules/policies/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteManagedRule: (id: number) => request<void>(`/rules/policies/${id}`, { method: 'DELETE' }),

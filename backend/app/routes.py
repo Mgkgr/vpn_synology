@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from ipaddress import ip_address, ip_network
@@ -32,7 +34,7 @@ from app.policy_rules import (
     ManagedRuleConfigurationError,
     ManagedRuleValidationError,
 )
-from app.rules import DirectRuleValidationError
+from app.rules import DirectRuleConflictError, DirectRuleValidationError
 from app.maintenance_client import MaintenanceBusy, MaintenanceClient, MaintenanceConflict, MaintenanceUnavailable
 from app.schemas import (
     AuthSessionResponse,
@@ -108,6 +110,7 @@ class RuntimeContainer:
     outbound_health_enabled: bool = False
     kuma_publisher: Any | None = None
     maintenance_client: Any | None = None
+    site_probes: Any | None = None
 
 
 def build_api_router() -> APIRouter:
@@ -541,33 +544,49 @@ def build_api_router() -> APIRouter:
     @router.get("/rules", response_model=RulesResponse)
     async def rules(request: Request, _: AuthenticatedSession = Depends(require_admin)) -> RulesResponse:
         runtime = _runtime(request)
-        try:
-            controller_rules = await runtime.mihomo.rules()
-            providers = await runtime.mihomo.rule_providers()
-            direct_text = await _await_if_needed(runtime.rule_service.read_direct_rules())
-        except Exception as error:
-            raise _upstream_failure(error) from error
-        if not isinstance(direct_text, str):
-            raise _upstream_failure()
+        section_errors: dict[str, str] = {}
+
+        async def read_section(key, operation, default, message):
+            try:
+                return await asyncio.wait_for(operation(), timeout=3)
+            except Exception:
+                # Only constant, browser-safe messages. A controller outage must
+                # not hide the local catalogue or turn an unreadable file empty.
+                section_errors[key] = message
+                return default
+
+        async def read_rules():
+            return [ControllerRuleResponse(
+                type=_safe_required(getattr(rule, "type", None)),
+                payload=_safe_required(getattr(rule, "payload", None)),
+                proxy=_safe_required(getattr(rule, "proxy", None)),
+            ) for rule in await runtime.mihomo.rules()]
+
+        async def read_providers():
+            return [RuleProviderResponse(
+                name=_safe_required(getattr(provider, "name", None)),
+                behavior=_safe_required(getattr(provider, "behavior", None)),
+            ) for provider in await runtime.mihomo.rule_providers()]
+
+        async def read_direct():
+            text = await _await_if_needed(await asyncio.to_thread(runtime.rule_service.read_direct_rules))
+            if not isinstance(text, str):
+                raise TypeError("DIRECT file did not return text")
+            return text
+
+        controller_rules, providers, direct_text = await asyncio.gather(
+            read_section("rules", read_rules, [], "Правила Mihomo недоступны; фактическое применение не подтверждено."),
+            read_section("providers", read_providers, [], "Источники правил Mihomo недоступны."),
+            read_section("direct", read_direct, None, "DIRECT-список недоступен. Изменения заблокированы до успешного чтения."),
+        )
         policy_service = runtime.policy_rule_service
         policies = [] if policy_service is None else policy_service.list_policies()
         return RulesResponse(
-            rules=[
-                ControllerRuleResponse(
-                    type=_safe_required(getattr(rule, "type", None)),
-                    payload=_safe_required(getattr(rule, "payload", None)),
-                    proxy=_safe_required(getattr(rule, "proxy", None)),
-                )
-                for rule in controller_rules
-            ],
-            providers=[
-                RuleProviderResponse(
-                    name=_safe_required(getattr(provider, "name", None)),
-                    behavior=_safe_required(getattr(provider, "behavior", None)),
-                )
-                for provider in providers
-            ],
+            rules=controller_rules,
+            providers=providers,
             direct_text=direct_text,
+            direct_sha256=hashlib.sha256(direct_text.encode("utf-8")).hexdigest() if direct_text is not None else None,
+            section_errors=section_errors,
             policies=[_policy_response(item) for item in policies],
             policy_catalog=[
                 ManagedRuleCategoryResponse(
@@ -586,7 +605,10 @@ def build_api_router() -> APIRouter:
         _require_csrf(request, principal)
         runtime = _runtime(request)
         try:
-            revision = await runtime.rule_service.apply_direct_rules_async(payload.text, principal.username)
+            kwargs = {"expected_sha256": payload.expected_sha256} if payload.expected_sha256 is not None else {}
+            revision = await runtime.rule_service.apply_direct_rules_async(payload.text, principal.username, **kwargs)
+        except DirectRuleConflictError as error:
+            raise HTTPException(status.HTTP_409_CONFLICT, "DIRECT revision changed") from error
         except DirectRuleValidationError as error:
             _write_audit(runtime, principal.username, "direct_rules_validation_failed", succeeded=False)
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid direct rule") from error
@@ -667,7 +689,7 @@ def build_api_router() -> APIRouter:
         runtime = _runtime(request)
         metadata_reader = getattr(runtime.collector, "current_geo_metadata", None)
         if callable(metadata_reader):
-            current_assets, assets_error = metadata_reader()
+            current_assets, assets_error = await asyncio.to_thread(metadata_reader)
         else:
             current_assets, assets_error = (), "GeoData metadata is unavailable"
         with runtime.session_factory() as session:
@@ -734,9 +756,9 @@ def build_api_router() -> APIRouter:
         except Exception as error:
             _write_audit(runtime, principal.username, "geo_upgrade", succeeded=False)
             raise _upstream_failure(error) from error
-        _write_audit(runtime, principal.username, "geo_upgrade", succeeded=True)
         if not isinstance(update_id, int):
             # Compatibility with constrained test and legacy collector adapters.
+            _write_audit(runtime, principal.username, "geo_upgrade", succeeded=True)
             return Response(status_code=status.HTTP_202_ACCEPTED)
         with runtime.session_factory() as session:
             row = session.get(GeoUpdate, update_id)
@@ -945,8 +967,14 @@ def _read_host_health(path: Path) -> HostHealthResponse:
             network_tx_dropped=_nonnegative(network.get("tx_dropped")),
             containers=containers,
         )
-    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "host health is unavailable") from error
+    except FileNotFoundError as error:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "host health snapshot is missing") from error
+    except PermissionError as error:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "host health snapshot is not readable") from error
+    except OSError as error:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "host health snapshot read failed") from error
+    except (TypeError, ValueError) as error:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "host health snapshot is invalid") from error
 
 
 def _required_mapping(value: object) -> dict[str, object]:
@@ -1117,11 +1145,8 @@ def _geo_update_response(row: GeoUpdate, metadata: list[GeoFileMetadata]) -> Geo
     checked_files = sorted(set(before) | set(after))
     changed_files = sorted(
         filename
-        for filename in checked_files
-        if filename not in before
-        or filename not in after
-        or before[filename].size_bytes != after[filename].size_bytes
-        or before[filename].modified_at != after[filename].modified_at
+        for filename in set(before) & set(after)
+        if before[filename].size_bytes != after[filename].size_bytes
         or before[filename].sha256 != after[filename].sha256
     )
     if row.succeeded is None:
@@ -1130,7 +1155,7 @@ def _geo_update_response(row: GeoUpdate, metadata: list[GeoFileMetadata]) -> Geo
         verification = "failed"
     elif row.operation != "geo_upgrade":
         verification = "snapshot"
-    elif not after:
+    elif not before or not after or set(before) != set(after):
         verification = "unavailable"
     else:
         verification = "changed" if changed_files else "unchanged"

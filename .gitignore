@@ -2,14 +2,40 @@
 deploy/dashboard.env
 deploy/data/
 deploy/secrets/
+deploy/gateway/mihomo/
+deploy/gateway/wireguard/
+deploy/gateway/wg-easy/
+deploy/gateway/uptime-kuma/
+*.env
+*.env.*
+!*.env.example
+!*.env.sample
 *.sqlite3
+*.sqlite
+*.sqlite*-wal
+*.sqlite*-shm
+*.sqlite*-journal
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
 *.bak
 *.key
 *.pem
 *.p12
 *.pfx
 *.conf
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+GeoSite.dat
+GeoIP.dat
+Country.mmdb
+backups/
+restic-repository/
+gitleaks-report.*
 
 # JavaScript build artifacts
 frontend/node_modules/
@@ -17,6 +43,8 @@ frontend/dist/
 frontend/*.tsbuildinfo
 
 # Python caches and test output
+.venv/
+venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -27,7 +55,11 @@ htmlcov/
 .env
 .env.*
 !.env.example
+!.env.sample
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+.playwright-cli/
+.playwright-mcp/
+.superpowers/

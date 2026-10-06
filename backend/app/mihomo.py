@@ -7,12 +7,14 @@ import ipaddress
 import json
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import quote
 
 import httpx
 
 from app.settings import DELAY_TEST_HOST_ALLOWLIST
+from app.site_probe_catalog import SITE_PROBE_ROUTES, SITE_PROBE_TARGETS, SiteProbeObservation
 
 
 CONTROL_ENDPOINTS = {
@@ -303,6 +305,82 @@ class MihomoClient:
         except (TypeError, ValueError) as error:
             raise self._invalid_payload("control_delay") from error
 
+    async def site_probe(self, route_id: str, service_key: str) -> SiteProbeObservation:
+        """HEAD through a dedicated wrapper; never test a working member itself."""
+        if route_id not in SITE_PROBE_ROUTES or service_key not in SITE_PROBE_TARGETS:
+            raise MihomoIntegrationError("site_probe", "invalid built-in site probe")
+        route, target = SITE_PROBE_ROUTES[route_id], SITE_PROBE_TARGETS[service_key]
+        path = f"proxies/{route.group}"
+
+        async def group():
+            value = await self._json("site_probe_group", "GET", path, timeout=3.0)
+            if (value.get("type") != "Selector" or value.get("all") != [route.member]
+                    or value.get("now") != route.member or value.get("hidden") is not True
+                    or value.get("emptyFallback") != "REJECT"):
+                raise ValueError("invalid diagnostic group")
+            return value
+
+        try:
+            before = await group()
+        except ValueError:
+            return SiteProbeObservation("unknown", reason="probe_group_invalid")
+        except MihomoIntegrationError:
+            return SiteProbeObservation("unknown", reason="controller_unavailable")
+        # Mihomo's unified-delay mode sends a second HEAD. Never change this
+        # global setting (or silently double the agreed probe workload).
+        try:
+            mode = await self._json("site_probe_mode", "GET", "configs", timeout=3.0)
+        except MihomoIntegrationError:
+            return SiteProbeObservation("unknown", reason="controller_unavailable")
+        if mode.get("unified-delay") is not False:
+            return SiteProbeObservation("unknown", reason="probe_mode_invalid")
+        try:
+            addresses = []
+            for kind in ("A", "AAAA"):
+                answer = await self._json("site_probe_dns", "GET", "dns/query",
+                                          params={"name": httpx.URL(target.url).host, "type": kind}, timeout=3.0)
+                addresses.extend(_site_dns_addresses(answer))
+            if not addresses:
+                raise ValueError("no public address")
+        except (ValueError, MihomoIntegrationError):
+            return SiteProbeObservation("unknown", reason="dns_preflight_failed")
+        started = datetime.now(UTC)
+        failure = None
+        delay = None
+        try:
+            payload = await self._json("site_probe", "GET", path + "/delay",
+                                       params={"url": target.url, "timeout": "10000", "expected": "200-399"}, timeout=12.0)
+            delay = _nonnegative_int(payload.get("delay"))
+            if not 0 < delay <= 10000:
+                raise ValueError("invalid probe delay")
+        except MihomoIntegrationError as error:
+            failure = "probe_timeout" if error.status_code == 504 else "probe_failed" if error.status_code == 503 else None
+            if failure is None:
+                return SiteProbeObservation("unknown", reason="controller_unavailable")
+        except ValueError:
+            return SiteProbeObservation("unknown", reason="probe_result_unconfirmed")
+        try:
+            after = await group()
+        except ValueError:
+            return SiteProbeObservation("unknown", reason="probe_group_invalid")
+        except MihomoIntegrationError:
+            return SiteProbeObservation("unknown", reason="controller_unavailable")
+        if failure:
+            return SiteProbeObservation("failed", reason=failure)
+        try:
+            previous, current = _site_url_result(before, target.url), _site_url_result(after, target.url)
+            if current is None or current == previous:
+                raise ValueError("no new per-URL result")
+            observed, alive, recorded_delay = current
+            if not started - timedelta(seconds=2) <= observed <= datetime.now(UTC) + timedelta(seconds=2):
+                raise ValueError("stale per-URL result")
+            if alive and recorded_delay != delay:
+                raise ValueError("uncorrelated delay result")
+            return SiteProbeObservation("responded" if alive else "http_rejected", delay,
+                                        None if alive else "http_status_outside_expected")
+        except (ValueError, TypeError):
+            return SiteProbeObservation("unknown", reason="probe_result_unconfirmed")
+
     async def dns_lookup(self, url: str) -> DnsLookup:
         """Resolve one approved probe hostname through Mihomo DNS.
 
@@ -515,6 +593,45 @@ def _normalized_rule(value: object) -> str:
         if normalized:
             return normalized
     return "UNKNOWN"
+
+
+def _site_url_result(payload: Mapping[str, Any], url: str) -> tuple[datetime, bool, int] | None:
+    extra = payload.get("extra", {})
+    if not isinstance(extra, Mapping):
+        raise ValueError("invalid per-URL state")
+    state = extra.get(url)
+    if state is None:
+        return None
+    if not isinstance(state, Mapping) or not isinstance(state.get("alive"), bool):
+        raise ValueError("invalid per-URL state")
+    history = state.get("history")
+    if not isinstance(history, list) or not history or not isinstance(history[-1], Mapping):
+        raise ValueError("missing per-URL history")
+    item = history[-1]
+    observed = datetime.fromisoformat(_required_text(item.get("time")).replace("Z", "+00:00"))
+    if observed.tzinfo is None:
+        raise ValueError("naive probe timestamp")
+    return observed, state["alive"], _nonnegative_int(item.get("delay"))
+
+
+def _site_dns_addresses(payload: Mapping[str, Any]) -> tuple[str, ...]:
+    status = payload.get("Status", payload.get("status", 0))
+    if type(status) is not int or status != 0:
+        raise ValueError("DNS lookup failed")
+    answers = payload.get("Answer", payload.get("answer", []))
+    if not isinstance(answers, list) or len(answers) > 128:
+        raise ValueError("invalid DNS result")
+    addresses = []
+    for answer in answers:
+        if not isinstance(answer, Mapping):
+            raise ValueError("invalid DNS answer")
+        if answer.get("type") == 5:  # CNAME: inspect all A/AAAA answers, not only the first.
+            continue
+        address = ipaddress.ip_address(_required_text(answer.get("data")))
+        if not address.is_global or address.is_multicast or address.is_reserved:
+            raise ValueError("nonpublic DNS answer")
+        addresses.append(str(address))
+    return tuple(addresses)
 
 
 def _dns_addresses(payload: Mapping[str, Any]) -> tuple[str, ...]:

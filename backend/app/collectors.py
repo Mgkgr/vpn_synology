@@ -348,22 +348,35 @@ class LocalGeoFileStore:
     """Read mounted GeoIP/GeoSite files without modifying them."""
 
     def metadata(self, directory: Path) -> tuple[GeoFileSnapshot, ...]:
+        snapshots, errors = self.inspect(directory)
+        if errors:
+            raise OSError("Some GeoData files are unreadable")
+        return snapshots
+
+    def inspect(self, directory: Path) -> tuple[tuple[GeoFileSnapshot, ...], tuple[str, ...]]:
+        """Keep independently readable files visible; never leak exception text."""
         if not directory.is_dir():
             raise OSError("GeoData directory is unavailable")
         snapshots: list[GeoFileSnapshot] = []
+        errors: list[str] = []
         for path in sorted(directory.iterdir(), key=lambda item: item.name.casefold()):
-            if not path.is_file() or not _is_geodata_filename(path.name):
+            if not _is_geodata_filename(path.name):
                 continue
-            stat = path.stat()
-            snapshots.append(
-                GeoFileSnapshot(
-                    filename=path.name,
-                    size_bytes=stat.st_size,
-                    modified_at=datetime.fromtimestamp(stat.st_mtime, UTC),
-                    sha256=_sha256_file(path),
+            try:
+                if not path.is_file():
+                    continue
+                stat = path.stat()
+                snapshots.append(
+                    GeoFileSnapshot(
+                        filename=path.name,
+                        size_bytes=stat.st_size,
+                        modified_at=datetime.fromtimestamp(stat.st_mtime, UTC),
+                        sha256=_sha256_file(path),
+                    )
                 )
-            )
-        return tuple(snapshots)
+            except OSError:
+                errors.append(path.name)
+        return tuple(snapshots), tuple(errors)
 
 
 class Collector:
@@ -876,6 +889,12 @@ class Collector:
     def current_geo_metadata(self) -> tuple[tuple[GeoFileSnapshot, ...], str | None]:
         """Return the mounted GeoData state without creating an audit record."""
 
+        if isinstance(self._files, LocalGeoFileStore):
+            try:
+                snapshots, errors = self._files.inspect(self._geodata_dir)
+                return snapshots, "Недоступны файлы GeoData: " + ", ".join(errors) if errors else None
+            except OSError:
+                return (), "GeoData metadata is unavailable"
         return self._read_geo_metadata()
 
     @staticmethod

@@ -8,6 +8,17 @@ afterEach(() => {
 })
 
 describe('клиент защищённого API', () => {
+  it('reads service snapshots using GET without a diagnostic mutation', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ enabled: false, services: [] }), { status: 200 }))
+    vi.stubGlobal('fetch', fetcher)
+    await api.siteProbes()
+    expect(fetcher).toHaveBeenCalledOnce()
+    const [url, options] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('/api/rules/service-checks')
+    expect(options.method ?? 'GET').toBe('GET')
+    expect(options.body).toBeUndefined()
+    expect(options.signal).toBeDefined()
+  })
   it('читает job id из принятого 202 ответа обслуживания', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ job_id: 'b'.repeat(32), phase: 'queued' }), { status: 202 })))
     const response = await api.submitMaintenance('b'.repeat(32), {
@@ -33,6 +44,14 @@ describe('клиент защищённого API', () => {
     await expect(api.hostHealth()).rejects.toMatchObject({
       status: 503,
       message: expect.stringContaining('Снимок состояния NAS ещё не собран'),
+    })
+  })
+
+  it('explains a DIRECT revision conflict without suggesting an immediate retry', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 409 })))
+    await expect(api.applyDirectRules('DOMAIN,example.org,DIRECT', 'a'.repeat(64))).rejects.toMatchObject({
+      status: 409,
+      message: 'Изменение DIRECT-списка отклонено: конфликт состояния или другая операция. Черновик сохранён; обновите сведения перед повтором.',
     })
   })
 })

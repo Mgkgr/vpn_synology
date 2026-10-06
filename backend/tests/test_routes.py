@@ -4,6 +4,8 @@ import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import ipaddress
+import hashlib
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -176,6 +178,26 @@ def csrf(client: TestClient) -> dict[str, str]:
     return {"X-CSRF-Token": client.headers["X-CSRF-Token"]}
 
 
+def test_rules_file_read_does_not_block_the_api_event_loop(route_parts) -> None:
+    client, _factory = route_parts
+    threads = {}
+
+    class ObservedRules(FakeRules):
+        def read_direct_rules(self):
+            threads["file"] = threading.get_ident()
+            return super().read_direct_rules()
+
+    class ObservedMihomo(FakeMihomo):
+        async def rules(self):
+            threads["api"] = threading.get_ident()
+            return []
+
+    client.app.state.runtime.rule_service = ObservedRules()
+    client.app.state.runtime.mihomo = ObservedMihomo()
+    assert client.get("/api/rules").status_code == 200
+    assert threads["file"] != threads["api"]
+
+
 def test_root_serves_the_spa_entry_document(route_parts) -> None:
     client, _factory = route_parts
 
@@ -303,6 +325,124 @@ def test_rules_returns_the_exact_loaded_direct_file_only_to_authenticated_owner(
 
     assert response.status_code == 200
     assert response.json()["direct_text"] == "DOMAIN-SUFFIX,example.local,DIRECT\nIP-CIDR,192.168.0.0/16,DIRECT\n"
+
+
+def test_rules_keeps_local_sections_when_controller_is_unavailable(route_parts) -> None:
+    client, _factory = route_parts
+
+    class UnavailableMihomo(FakeMihomo):
+        async def rules(self):
+            raise TimeoutError("secret controller URL must not leak")
+
+    client.app.state.runtime.mihomo = UnavailableMihomo()
+    response = client.get("/api/rules")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["direct_text"].startswith("DOMAIN-SUFFIX,example.local")
+    assert any(item["category"] == "openai" for item in data["policy_catalog"])
+    assert set(data["section_errors"]) == {"rules"}
+    assert "secret controller" not in response.text
+
+
+def test_rules_does_not_replace_an_unreadable_direct_file_with_empty_text(route_parts) -> None:
+    client, _factory = route_parts
+
+    class UnreadableRules(FakeRules):
+        def read_direct_rules(self):
+            raise PermissionError("private path")
+
+    client.app.state.runtime.rule_service = UnreadableRules()
+    response = client.get("/api/rules")
+    assert response.status_code == 200
+    assert response.json()["direct_text"] is None
+    assert set(response.json()["section_errors"]) == {"direct"}
+    assert response.json()["policy_catalog"]
+
+
+def test_direct_apply_rejects_stale_revision_without_mutation(route_parts, tmp_path) -> None:
+    client, factory = route_parts
+    path = tmp_path / "direct.txt"
+    path.write_text("DOMAIN,first.example,DIRECT\n", encoding="utf-8")
+    client.app.state.runtime.rule_service = RuleService(path, tmp_path / "revisions", FakeMihomo(), audit_session_factory=factory)
+    initial = client.get("/api/rules").json()
+    expected = hashlib.sha256(initial["direct_text"].encode()).hexdigest()
+    assert initial["direct_sha256"] == expected
+    path.write_text("DOMAIN,other.example,DIRECT\n", encoding="utf-8")
+    rejected = client.post("/api/rules/apply", json={"text": "DOMAIN,mine.example,DIRECT\n", "expected_sha256": expected}, headers=csrf(client))
+    assert rejected.status_code == 409
+    assert path.read_text(encoding="utf-8") == "DOMAIN,other.example,DIRECT\n"
+    current = client.get("/api/rules").json()["direct_sha256"]
+    accepted = client.post("/api/rules/apply", json={"text": "DOMAIN,mine.example,DIRECT\n", "expected_sha256": current}, headers=csrf(client))
+    assert accepted.status_code == 200
+    assert path.read_text(encoding="utf-8") == "DOMAIN,mine.example,DIRECT\n"
+
+
+def test_rules_reads_independent_controller_sections_concurrently(route_parts) -> None:
+    client, _factory = route_parts
+
+    class ConcurrentMihomo(FakeMihomo):
+        async def rules(self):
+            self.started = asyncio.Event()
+            await asyncio.wait_for(self.started.wait(), timeout=0.2)
+            return [SimpleNamespace(type="MATCH", payload="", proxy="VPS-FALLBACK")]
+
+        async def rule_providers(self):
+            self.started.set()
+            return []
+
+    client.app.state.runtime.mihomo = ConcurrentMihomo()
+    response = client.get("/api/rules")
+    assert response.status_code == 200
+    assert response.json()["rules"][0]["proxy"] == "VPS-FALLBACK"
+    assert response.json()["section_errors"] == {}
+
+
+def test_geo_upgrade_does_not_audit_failed_operation_as_success(route_parts) -> None:
+    client, factory = route_parts
+    with factory.begin() as session:
+        row = GeoUpdate(observed_at=datetime.now(UTC), source="manual", operation="geo_upgrade", succeeded=False)
+        session.add(row)
+        session.flush()
+        update_id = row.id
+
+    class FailedCollector:
+        async def manual_geo_upgrade(self, actor):
+            return update_id
+
+    client.app.state.runtime.collector = FailedCollector()
+    response = client.post("/api/updates/geo", headers=csrf(client))
+    assert response.status_code == 200
+    assert response.json()["succeeded"] is False
+    with factory() as session:
+        events = session.scalars(select(AuditEvent).where(AuditEvent.action == "geo_upgrade")).all()
+        assert not any(event.succeeded for event in events)
+
+
+def test_geo_verification_does_not_treat_mtime_only_as_content_update(route_parts) -> None:
+    client, factory = route_parts
+    before_time = datetime(2026, 10, 1, tzinfo=UTC)
+    with factory.begin() as session:
+        row = GeoUpdate(observed_at=datetime.now(UTC), source="manual", operation="geo_upgrade", succeeded=True)
+        session.add(row)
+        session.flush()
+        for phase, modified in [("before", before_time), ("after", before_time + timedelta(days=1))]:
+            session.add(GeoFileMetadata(geo_update_id=row.id, phase=phase, filename="GeoSite.dat", size_bytes=10, modified_at=modified, sha256="a" * 64))
+    response = client.get("/api/updates")
+    update = response.json()["updates"][0]
+    assert update["verification"] == "unchanged"
+    assert update["changed_files"] == []
+
+
+def test_geo_verification_needs_both_before_and_after_snapshots(route_parts) -> None:
+    client, factory = route_parts
+    with factory.begin() as session:
+        row = GeoUpdate(observed_at=datetime.now(UTC), source="manual", operation="geo_upgrade", succeeded=True)
+        session.add(row)
+        session.flush()
+        session.add(GeoFileMetadata(geo_update_id=row.id, phase="after", filename="GeoSite.dat", size_bytes=10, modified_at=datetime.now(UTC), sha256="a" * 64))
+    update = client.get("/api/updates").json()["updates"][0]
+    assert update["verification"] == "unavailable"
+    assert update["changed_files"] == []
 
 
 def test_live_fallback_selection_overrides_a_stored_observation(route_parts) -> None:

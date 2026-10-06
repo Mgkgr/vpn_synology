@@ -11,6 +11,20 @@ afterEach(() => {
 })
 
 describe('UpdatesPage', () => {
+  it('does not label observation time as a file update or claim unchanged files are newest', async () => {
+    vi.spyOn(api, 'updates').mockResolvedValue({
+      assets: [{ filename: 'GeoSite.dat', kind: 'GeoSite', size_bytes: 12, modified_at: '2026-10-01T04:00:00Z', sha256: 'b'.repeat(64), last_observed_at: '2026-10-04T04:00:00Z' }],
+      updates: [{ id: 9, observed_at: '2026-10-04T04:00:00Z', source: 'manual', operation: 'geo_upgrade', succeeded: true, status_code: 204, version: null, verification: 'unchanged', checked_files: ['GeoSite.dat'], changed_files: [] }],
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><UpdatesPage /></QueryClientProvider>)
+    await screen.findByText('GeoSite · GeoSite.dat')
+    expect(screen.getByText('Содержимое файлов не изменилось')).toBeVisible()
+    expect(screen.queryByText(/уже актуальны/)).not.toBeInTheDocument()
+    expect(screen.getByText(/Дата файла/)).toBeVisible()
+    expect(screen.getByText(/Наблюдался/)).toBeVisible()
+  })
+
   it('показывает фактическую дату файлов GeoData и историю изменений правил', async () => {
     vi.spyOn(api, 'updates').mockResolvedValue({
       assets: [

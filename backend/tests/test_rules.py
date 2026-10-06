@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from datetime import UTC, datetime
 
 import pytest
@@ -83,6 +84,36 @@ def test_preview_accepts_comments_blanks_and_validated_direct_rules(rule_paths) 
         "IP-CIDR,192.0.2.0/24,DIRECT",
         "GEOIP,private,DIRECT",
     )
+
+
+def test_preserves_no_resolve_only_for_ip_direct_rules(rule_paths) -> None:
+    path, revisions = rule_paths
+    mihomo = ReloadingMihomo(revisions)
+    service = RuleService(path, revisions, mihomo)
+    text = "DOMAIN,exact.example,DIRECT\nIP-CIDR,192.168.3.0/24,DIRECT,no-resolve\nGEOIP,private,DIRECT,no-resolve\n"
+    service.apply_direct_rules(text, "admin")
+    assert path.read_text(encoding="utf-8") == text
+    assert mihomo.calls == 1
+    with pytest.raises(DirectRuleValidationError):
+        service.preview_direct_rules("GEOSITE,openai,DIRECT,no-resolve")
+
+
+def test_stale_direct_revision_never_overwrites_newer_file(rule_paths) -> None:
+    path, revisions = rule_paths
+    original = path.read_text(encoding="utf-8")
+    expected_hash = hashlib.sha256(original.encode("utf-8")).hexdigest()
+    path.write_text("DOMAIN,newer.example,DIRECT\n", encoding="utf-8")
+    mihomo = ReloadingMihomo(revisions)
+    service = RuleService(path, revisions, mihomo)
+    try:
+        asyncio.run(service.apply_direct_rules_async("DOMAIN,my.example,DIRECT\n", "admin", expected_sha256=expected_hash))
+    except Exception as error:
+        assert type(error).__name__ == "DirectRuleConflictError"
+    else:
+        pytest.fail("stale edit was accepted")
+    assert path.read_text(encoding="utf-8") == "DOMAIN,newer.example,DIRECT\n"
+    assert mihomo.calls == 0
+    assert not revisions.exists()
 
 
 def test_apply_creates_revision_before_mihomo_reload(rule_paths, session_factory) -> None:

@@ -1,9 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api/client'
 import { RulesPage } from './RulesPage'
+
+beforeEach(() => {
+  vi.spyOn(api, 'updates').mockResolvedValue({ updates: [], assets: [] })
+  vi.spyOn(api, 'siteProbes').mockResolvedValue({ enabled: false, timezone: 'Asia/Yekaterinburg', next_run_at: null, run: null, services: [] })
+})
 
 afterEach(() => {
   cleanup()
@@ -28,7 +33,7 @@ describe('RulesPage', () => {
     expect(screen.getByText('Срабатывает по IP назначения; CDN может выбрать другой регион.')).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: 'Обновить GeoSite / GeoIP' }))
     await waitFor(() => expect(updateGeo).toHaveBeenCalledOnce())
-    expect(screen.getByText('Готово: GeoIP.dat, GeoSite.dat уже актуальны. HTTP 204.')).toBeVisible()
+    expect(screen.getByText('Содержимое файлов не изменилось: GeoIP.dat, GeoSite.dat. HTTP 204.')).toBeVisible()
   })
 
   it('показывает отдельный статус до загрузки GeoSite, GeoIP и правил Mihomo', () => {
@@ -55,38 +60,38 @@ describe('RulesPage', () => {
 
     render(<QueryClientProvider client={client}><RulesPage /></QueryClientProvider>)
 
-    await screen.findByRole('button', { name: /Кинопоиск/ })
-    fireEvent.change(screen.getByLabelText('Категория нового правила'), { target: { value: 'kinopoisk' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Добавить правило' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Кинопоиск/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Применить' }))
 
-    expect(await screen.findByText('Правило применено. Браузер потерял ответ при перезагрузке Mihomo, но состояние подтверждено.', {}, { timeout: 3_000 })).toBeVisible()
+    expect(await screen.findByText(/Ответ потерян, сохранённое состояние подтверждено/, {}, { timeout: 3_000 })).toBeVisible()
     expect(screen.queryByText('Failed to fetch')).not.toBeInTheDocument()
   })
 
   it('подтверждает применённый DIRECT-список после потери браузером ответа на reload Mihomo', async () => {
-    let rulesCalls = 0
+    let applied = false
     vi.spyOn(api, 'rules').mockImplementation(async () => {
-      rulesCalls += 1
       return {
         rules: [],
         providers: [],
-        direct_text: rulesCalls > 1 ? 'DOMAIN-SUFFIX,azk59.permkrai.ru,DIRECT\n' : '',
+        direct_text: applied ? 'DOMAIN-SUFFIX,azk59.permkrai.ru,DIRECT\n' : '',
         policy_catalog: [],
         policies: [],
       }
     })
-    vi.spyOn(api, 'applyDirectRules').mockRejectedValue(new TypeError('Failed to fetch'))
+    vi.spyOn(api, 'applyDirectRules').mockImplementation(async () => { applied = true; throw new TypeError('Failed to fetch') })
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
     render(<QueryClientProvider client={client}><RulesPage /></QueryClientProvider>)
 
+    fireEvent.click(screen.getByText(/Технический режим/))
     const editor = await screen.findByLabelText('Правила DIRECT')
     await waitFor(() => expect(editor).toBeEnabled())
     fireEvent.change(editor, { target: { value: 'DOMAIN-SUFFIX,azk59.permkrai.ru,DIRECT\n' } })
-    await waitFor(() => expect(screen.getByText('+ DOMAIN-SUFFIX,azk59.permkrai.ru,DIRECT')).toBeVisible())
+    fireEvent.click(screen.getByText('Предпросмотр изменений'))
+    expect(screen.getByText('+ DOMAIN-SUFFIX,azk59.permkrai.ru,DIRECT')).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: 'Применить DIRECT-правила' }))
 
-    expect(await screen.findByText('DIRECT-правила применены. Браузер потерял ответ при перезагрузке Mihomo, но состояние подтверждено.', {}, { timeout: 3_000 })).toBeVisible()
+    expect(await screen.findByText(/Ответ потерян, сохранённое состояние подтверждено/, {}, { timeout: 3_000 })).toBeVisible()
     expect(screen.queryByText('Failed to fetch')).not.toBeInTheDocument()
   })
 
@@ -105,7 +110,8 @@ describe('RulesPage', () => {
       direct_text: 'DOMAIN-SUFFIX,example.local,DIRECT\nIP-CIDR,192.168.0.0/16,DIRECT\n',
     })
 
-    const editor = screen.getByLabelText('Правила DIRECT')
+    fireEvent.click(screen.getByText(/Технический режим/))
+    const editor = await screen.findByLabelText('Правила DIRECT')
     await waitFor(() => expect(editor).toHaveValue('DOMAIN-SUFFIX,example.local,DIRECT\nIP-CIDR,192.168.0.0/16,DIRECT\n'))
     expect(apply).toBeDisabled()
     fireEvent.change(editor, { target: { value: 'DOMAIN-SUFFIX,example.local,DIRECT\n' } })
@@ -130,8 +136,8 @@ describe('RulesPage', () => {
     render(<QueryClientProvider client={client}><RulesPage /></QueryClientProvider>)
 
     fireEvent.click(await screen.findByRole('button', { name: /Claude \/ Anthropic/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'DIRECT в обход VPN' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Добавить правило' }))
+    fireEvent.change(screen.getByLabelText('Маршрут'), { target: { value: 'DIRECT' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Применить' }))
 
     await waitFor(() => expect(create).toHaveBeenCalled())
     expect(create.mock.calls[0]?.[0]).toEqual({ kind: 'GEOSITE', category: 'anthropic', action: 'DIRECT', enabled: true })
@@ -159,8 +165,8 @@ describe('RulesPage', () => {
     expect(await screen.findByRole('heading', { name: 'Российские сервисы' })).toBeVisible()
     expect(screen.getByText(/Широкое правило направит весь набор/)).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: /^Ozon\b/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'DIRECT в обход VPN' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Добавить правило' }))
+    fireEvent.change(screen.getByLabelText('Маршрут'), { target: { value: 'DIRECT' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Применить' }))
 
     await waitFor(() => expect(create.mock.calls[0]?.[0]).toEqual({ kind: 'GEOSITE', category: 'ozon', action: 'DIRECT', enabled: true }))
   })
@@ -194,8 +200,8 @@ describe('RulesPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Публичные торрент-трекеры/ }))
     expect(create).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Авто VPN WG-IMP → HY2-USA' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Добавить правило' }))
+    fireEvent.change(screen.getByLabelText('Маршрут'), { target: { value: 'VPS-FALLBACK' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Применить' }))
 
     await waitFor(() => expect(create).toHaveBeenCalled())
     expect(create.mock.calls[0]?.[0]).toEqual({ kind: 'GEOSITE', category: 'category-public-tracker', action: 'VPS-FALLBACK', enabled: true })
@@ -215,8 +221,10 @@ describe('RulesPage', () => {
 
     const category = await screen.findByRole('button', { name: /OpenAI \/ ChatGPT/ })
     expect(category).toHaveClass('is-active')
+    expect(category).not.toHaveClass('selected')
+    fireEvent.click(category)
     expect(category).toHaveClass('selected')
     expect(category).toHaveAttribute('data-policy-state', 'active')
-    expect(category).toHaveAttribute('aria-pressed', 'true')
+    expect(category).toHaveAttribute('aria-expanded', 'true')
   })
 })

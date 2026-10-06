@@ -20,6 +20,8 @@ from app.db import create_all, create_session_factory, create_sqlite_engine
 from app.mihomo import MihomoClient
 from app.health_collector import HealthCollector, register_health_jobs
 from app.health_api import build_health_router
+from app.site_probe_api import build_site_probe_router
+from app.site_probes import SiteProbeCollector, SiteProbeService, register_site_probe_jobs
 from app.maintenance_api import build_maintenance_router, install_maintenance_handlers
 from app.maintenance_client import MaintenanceClient
 from app.kuma_push import KumaPublisher, KumaPushClient, load_push_tokens, register_kuma_jobs
@@ -47,6 +49,7 @@ class CollectorRuntime:
     container: RuntimeContainer | None = None
     health_collector: HealthCollector | None = None
     kuma_publisher: KumaPublisher | None = None
+    site_probe_collector: SiteProbeCollector | None = None
 
 
 def create_collector_runtime(settings: Settings | None = None) -> CollectorRuntime:
@@ -113,7 +116,9 @@ def create_collector_runtime(settings: Settings | None = None) -> CollectorRunti
         tokens, token_error = load_push_tokens(settings.kuma_push_tokens_file, tuple(entry.id for entry in health_collector.service.registry))
         publisher = KumaPublisher(session_factory, health_collector.service, KumaPushClient(str(settings.kuma_url)), tokens, token_error)
         container.kuma_publisher = publisher
-    return CollectorRuntime(collector, AsyncIOScheduler(timezone="UTC"), engine.dispose, container, health_collector, publisher)
+    container.site_probes = SiteProbeService(session_factory, enabled=settings.site_probes_enabled)
+    site_collector = SiteProbeCollector(mihomo, container.site_probes) if settings.site_probes_enabled else None
+    return CollectorRuntime(collector, AsyncIOScheduler(timezone="UTC"), engine.dispose, container, health_collector, publisher, site_collector)
 
 
 def create_app(
@@ -155,6 +160,7 @@ def create_app(
         register_collector_jobs(runtime.scheduler, runtime.collector)
         register_health_jobs(runtime.scheduler, runtime.health_collector)
         register_kuma_jobs(runtime.scheduler, runtime.kuma_publisher)
+        register_site_probe_jobs(runtime.scheduler, runtime.site_probe_collector)
         runtime.scheduler.start()
         app.state.collector = runtime.collector
         try:
@@ -225,6 +231,7 @@ def create_app(
 
     application.include_router(build_api_router())
     application.include_router(build_health_router())
+    application.include_router(build_site_probe_router())
     application.include_router(build_maintenance_router())
     install_maintenance_handlers(application)
 

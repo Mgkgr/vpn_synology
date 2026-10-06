@@ -43,7 +43,7 @@ describe('authenticated application routes', () => {
 
     render(<MemoryRouter initialEntries={['/routes']}><App /></MemoryRouter>)
 
-    expect(await screen.findByRole('button', { name: /WG-IMP/ })).toBeVisible()
+    expect(await screen.findByRole('button', { name: /VLESS-NL/ })).toBeVisible()
   })
 
   it('redirects an unauthenticated initial session check to the login page', async () => {

@@ -259,13 +259,16 @@ class RuleProviderResponse(BaseModel):
 class RulesResponse(BaseModel):
     rules: list[ControllerRuleResponse]
     providers: list[RuleProviderResponse]
-    direct_text: str
+    direct_text: str | None
+    direct_sha256: str | None = None
+    section_errors: dict[str, str] = Field(default_factory=dict)
     policies: list["ManagedRulePolicyResponse"] = Field(default_factory=list)
     policy_catalog: list["ManagedRuleCategoryResponse"] = Field(default_factory=list)
 
 
 class DirectRuleApplyRequest(_StrictModel):
     text: str = Field(max_length=262_144)
+    expected_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 class DirectRuleApplyResponse(BaseModel):
