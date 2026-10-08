@@ -36,6 +36,10 @@ class ControlError(RuntimeError):
 def runtime_hash(row):
     # Secret environment values enter only a hash in memory, never status/logs.
     value = copy.deepcopy(row['runtime'])
+    if isinstance(value.get('mounts'), list):
+        # Docker derives Mounts from a Go map; enumeration order is not stable.
+        # Preserve every field (including RW/source), canonicalize only ordering.
+        value['mounts'] = sorted(value['mounts'], key=canonical)
     config = value.get('config')
     if isinstance(config, dict):
         if config.get('Hostname') == row.get('id', '')[:12]:

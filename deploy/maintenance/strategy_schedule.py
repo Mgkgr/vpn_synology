@@ -33,10 +33,15 @@ class StrategySchedule:
             for policy in snapshot['services']:
                 sid=policy['service_id']
                 row=db.execute('SELECT value FROM strategy_schedules WHERE service=?',(sid,)).fetchone()
-                value=json.loads(row[0]) if row else dict(last_tick=now,next_check=now,daily=None,pending=None,search_at=None)
                 if not policy['enabled']:
-                    value['pending']=None
-                elif now<value['last_tick']:
+                    if row:
+                        value=json.loads(row[0])
+                        if value.get('pending') is not None:
+                            value['pending']=None
+                            db.execute('UPDATE strategy_schedules SET value=? WHERE service=?',(canonical(value).decode(),sid))
+                    continue
+                value=json.loads(row[0]) if row else dict(last_tick=now,next_check=now,daily=None,pending=None,search_at=None)
+                if now<value['last_tick']:
                     # Do not turn wall-clock reversal into a burst of probes.
                     value.update(next_check=now+policy['interval_minutes']*60,pending=None)
                 elif policy['last_search_at'] is not None and now-policy['last_search_at']<900:

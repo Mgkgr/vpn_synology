@@ -97,6 +97,15 @@ class DockerControlTests(unittest.TestCase):
         with self.assertRaises(self.m.ControlError):
             self.m.DockerControl(self.contracts, self.private, executable='/usr/local/bin/docker', runner=self.run_command)
 
+    def test_docker_mount_enumeration_order_is_not_configuration_drift(self):
+        row=copy.deepcopy(self.rows['dashboard'])
+        row['runtime']['mounts']=[{'Destination':'/data','Source':'/private/data','RW':True},
+                                   {'Destination':'/run/config','Source':'/private/config','RW':False}]
+        other=copy.deepcopy(row); other['runtime']['mounts'].reverse()
+        self.assertEqual(self.m.runtime_hash(row),self.m.runtime_hash(other))
+        other['runtime']['mounts'][0]['RW']=True
+        self.assertNotEqual(self.m.runtime_hash(row),self.m.runtime_hash(other))
+
 
 if __name__ == '__main__':
     unittest.main()

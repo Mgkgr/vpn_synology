@@ -52,7 +52,11 @@ VOLATILE_TABLES = {
     'wireguard': (),
     'dashboard': ('audit_events', 'dashboard_sessions', 'gateway_traffic_samples', 'geo_file_metadata',
                   'geo_updates', 'login_throttle_records', 'peer_baselines', 'peer_snapshots',
-                  'probe_events', 'route_events', 'traffic_hourly', 'traffic_monthly'),
+                  'probe_events', 'route_events', 'traffic_hourly', 'traffic_monthly',
+                  'maintenance_grants', 'maintenance_stepup_throttles', 'maintenance_submission_receipts',
+                  'maintenance_submit_intents', 'notification_delivery_states', 'outbound_control_cycles',
+                  'outbound_health_states', 'outbound_incidents', 'site_probe_results', 'site_probe_runs',
+                  'site_probe_schedule'),
     'uptime-kuma': ('domain_expiry', 'heartbeat', 'knex_migrations_lock', 'monitor_tls_info',
                    'notification_sent_history', 'stat_daily', 'stat_hourly', 'stat_minutely'),
 }

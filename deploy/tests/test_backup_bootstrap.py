@@ -51,6 +51,18 @@ class BackupBootstrapTests(unittest.TestCase):
                          'gateway/compose.yaml', 'dashboard/compose.yaml'} <= names)
         self.assertNotIn('restic-password', ' '.join(names))
 
+    def test_reviewed_additive_dashboard_state_is_copied_but_not_configuration_revision(self):
+        telemetry={'maintenance_grants','maintenance_stepup_throttles','maintenance_submission_receipts',
+            'maintenance_submit_intents','notification_delivery_states','outbound_control_cycles',
+            'outbound_health_states','outbound_incidents','site_probe_results','site_probe_runs','site_probe_schedule'}
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'dashboard.sqlite'
+            with closing(sqlite3.connect(str(path))) as db:
+                for name in set(self.m.TABLES['dashboard'])|telemetry:
+                    db.execute('CREATE TABLE "'+name+'" (id INTEGER)')
+            result=self.m.projections(path,'dashboard')
+            self.assertEqual({row['table'] for row in result},set(self.m.TABLES['dashboard']))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -158,6 +158,15 @@ class StrategyRunnerTests(unittest.TestCase):
         self.assertEqual(result['phase'],'completed')
         self.assertEqual(self.state.decision('youtube',1000),'disabled')
 
+    def test_disabled_schedule_does_not_persist_a_write_on_every_idle_tick(self):
+        from contextlib import closing
+        self.state.configure('youtube',dict(enabled=False,mode='pinned',interval_minutes=30,daily_enabled=True),
+                             self.state.snapshot(1000)['revision'],'owner',1000)
+        schedule=self.scheduling.StrategySchedule(self.runner)
+        for now in range(1000,1010): self.assertIsNone(schedule.tick(now))
+        with closing(self.jobs._connect()) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM strategy_schedules').fetchone()[0],0)
+
     def test_dns_or_age_change_during_backup_prevents_apply(self):
         original=self.adapter.backup
         def slow_backup(selections,revision):
