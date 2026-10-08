@@ -61,14 +61,18 @@ class DockerRuntime:
         if mode=='production': return self._exec('socks','probe',encoded,timeout=15)
         name='vpn-antidpi-probe-'+uuid.uuid4().hex
         try:
-            args=['run','--rm','--name',name,'--label','vpn.antidpi.scope=strategy-probe',
+            args=['create','--rm','--pull=never','--name',name,'--label','vpn.antidpi.scope=strategy-probe',
                   '--network','bridge','--read-only','--user','10002:10002','--cap-drop','ALL',
                   '--security-opt','no-new-privileges:true','--memory','256m',
                   '--tmpfs','/tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777',
                   '--env','PYTHONPATH=/opt/vpn','--env','PYTHONDONTWRITEBYTECODE=1',
                   '--volume',CODE+':/opt/vpn:ro','--entrypoint','python3',self.image,
                   '-B','-m','antidpi.runtime_service','probe',encoded]
-            return json.loads(self._run(args,timeout=15))
+            # DSM can spend 8-11 seconds starting a process before its HTTPS
+            # request begins. Keep lifecycle budgets separate; https_probe
+            # still enforces its own fixed 10-second network deadline.
+            self._run(args,timeout=25)
+            return json.loads(self._run(['start','-a',name],timeout=30))
         finally:
-            try: self._run(['rm','-f',name],timeout=10)
-            except Exception: pass  # Reconciler removes only this fixed labelled probe namespace.
+            try: self._run(['rm','-f',name],timeout=15)
+            except Exception: pass  # --rm also removes a finished container on the daemon side.
