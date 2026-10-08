@@ -204,7 +204,9 @@ class JobStore:
         now = time.time() if now is None else now
         with self._write() as db:
             row = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
-            if not row or phase not in TRANSITIONS.get(row["phase"], set()):
+            strategy_read_complete = (row and row['phase'] == 'preflight' and phase == 'completed'
+                and json.loads(row['request_json'])['action'].startswith('strategy_'))
+            if not row or (phase not in TRANSITIONS.get(row["phase"], set()) and not strategy_read_complete):
                 raise JobConflict("invalid_phase_transition")
             if phase == "apply" and row["cancel_requested"]:
                 raise JobConflict("cancel_requested")

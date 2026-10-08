@@ -14,6 +14,9 @@ from pathlib import Path
 
 from .protocol import MAX_FRAME, ProtocolError, canonical, decode_frame, parse_request
 from .store import JobBusy, JobConflict
+from .strategy_catalog import StrategyRequest
+from .strategy_runner import StrategyUnavailable
+from .strategy_state import StrategyConflict
 
 
 class ServiceError(RuntimeError):
@@ -51,24 +54,32 @@ def process_lock(private_path: Path):
 
 
 class MaintenanceService:
-    def __init__(self, store, inventory=None, queue_release_check=None, executor_ready=None):
+    def __init__(self, store, inventory=None, queue_release_check=None, executor_ready=None, strategies=None):
         self.store = store
         self.inventory = inventory
         self.queue_release_check = queue_release_check
         self.executor_ready = executor_ready or (lambda: False)
+        self.strategies = strategies
 
     def handle(self, raw, peer_uid):
         try:
             frame = decode_frame(raw, peer_uid)
             method, params = frame["method"], frame["params"]
             if method == "submit":
+                parsed = parse_request(params['request'])
+                if isinstance(parsed, StrategyRequest):
+                    if self.strategies is None:
+                        return {'ok':False,'error':'not_configured'}
+                    return {'ok':True,'result':self.strategies.submit(params['job_id'],parsed,params['actor'])}
                 if self.executor_ready() is not True:
                     return {"ok": False, "error": "not_configured"}
                 result = asdict(self.store.submit(params["job_id"], parse_request(params["request"]), params["actor"]))
             elif method == "cancel":
                 result = asdict(self.store.cancel(params["job_id"]))
             elif method == "job":
-                result = asdict(self.store.get_job(params["job_id"]))
+                result = self.strategies.job(params['job_id']) if self.strategies else asdict(self.store.get_job(params["job_id"]))
+            elif method == 'strategy_snapshot' and self.strategies:
+                result = self.strategies.snapshot()
             elif method == "jobs":
                 result = [asdict(job) for job in self.store.jobs()]
             elif method == "writer_acquire":
@@ -88,8 +99,10 @@ class MaintenanceService:
             return {"ok": True, "result": result}
         except JobBusy as error:
             return {"ok": False, "error": "busy", "job_id": error.job_id}
-        except JobConflict:
+        except (JobConflict, StrategyConflict):
             return {"ok": False, "error": "conflict"}
+        except StrategyUnavailable:
+            return {'ok':False,'error':'not_configured'}
         except (ProtocolError, ValueError, TypeError, KeyError, RecursionError):
             return {"ok": False, "error": "invalid_request"}
         except (OSError, sqlite3.Error):

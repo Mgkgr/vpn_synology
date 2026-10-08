@@ -6,6 +6,8 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Dict, Optional, Tuple, Union
 
+from .strategy_catalog import StrategyRequest, parse_strategy_request
+
 MAX_FRAME = 65536
 COMPONENTS = frozenset(("mihomo", "wireguard", "uptime-kuma", "metacubexd", "dashboard", "antidpi"))
 RESOURCES = frozenset(("rules", "geodata", "clients", "strategies", "dashboard_config"))
@@ -55,6 +57,11 @@ def _ids(value):
 def parse_request(value) -> Union[MaintenanceRequest, CancelRequest]:
     if not isinstance(value, dict):
         raise ProtocolError("invalid_request")
+    if isinstance(value.get('action'), str) and value['action'].startswith('strategy_'):
+        try:
+            return parse_strategy_request(value)
+        except ValueError:
+            raise ProtocolError('invalid_strategy_request') from None
     if value.get("action") == "cancel":
         _keys(value, ("action", "job_id"))
         return CancelRequest("cancel", require_id(value["job_id"]))
@@ -123,7 +130,7 @@ def decode_frame(raw: bytes, peer_uid: int) -> dict:
     if type(value["version"]) is not int or value["version"] != 1:
         raise ProtocolError("unsupported_protocol")
     method, params = value["method"], value["params"]
-    methods = {"submit": ("job_id", "actor", "request"), "cancel": ("job_id", "actor"), "job": ("job_id",), "jobs": (), "components": (), "check_releases": (), "writer_acquire": ("resource",), "writer_renew": ("lease_id",), "writer_release": ("lease_id", "outcome")}
+    methods = {"submit": ("job_id", "actor", "request"), "cancel": ("job_id", "actor"), "job": ("job_id",), "jobs": (), "components": (), "strategy_snapshot": (), "check_releases": (), "writer_acquire": ("resource",), "writer_renew": ("lease_id",), "writer_release": ("lease_id", "outcome")}
     if not isinstance(method, str) or method not in methods:
         raise ProtocolError("method_not_allowed")
     _keys(params, methods[method])
@@ -139,6 +146,6 @@ def decode_frame(raw: bytes, peer_uid: int) -> dict:
         raise ProtocolError("invalid_resource")
     if "outcome" in params and params["outcome"] not in ("complete", "uncertain"):
         raise ProtocolError("invalid_outcome")
-    if method == "submit" and not isinstance(parse_request(params["request"]), MaintenanceRequest):
+    if method == "submit" and not isinstance(parse_request(params["request"]), (MaintenanceRequest, StrategyRequest)):
         raise ProtocolError("invalid_submit")
     return value
