@@ -1,6 +1,5 @@
 """Root-only daemon assembly; no arbitrary requests, URLs or shell execution."""
 from contextlib import closing
-from concurrent.futures import ThreadPoolExecutor
 import ipaddress
 import json
 import os
@@ -26,6 +25,7 @@ from .store import JobStore,JobBusy
 from .strategy_state import StrategyStore
 from .strategy_runner import StrategyRunner
 from .worker import JobLoop
+from .antidpi_dns import DnsRefresher
 
 PRIVATE=Path('/volume1/docker/vpn-dashboard-maintenance/private')
 RUNTIME=Path('/volume1/docker/vpn-antidpi/runtime')
@@ -81,24 +81,15 @@ def fresh_dns_lease(fetch,revision,clock=time.time,sleep=time.sleep):
     raise ValueError('dns_ttl_too_short')
 
 
-def renew_dns(private=PRIVATE,runtime=RUNTIME):
-    controller=validate_controller(read_root_json(private/'antidpi-controller.json'))
-    def query(host):
-        opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
-        request=urllib.request.Request(controller['url']+'/dns/query?type=A&name='+host,
-                                      headers={'Authorization':'Bearer '+controller['secret']})
-        with opener.open(request,timeout=6) as response:
-            body=response.read(32769)
-            if len(body)>32768: raise ValueError('dns_response_too_large')
-            return host,json.loads(body)
-    def fetch():
-        with ThreadPoolExecutor(max_workers=5) as pool:
-            return dict(pool.map(query,tuple(HOSTS.values())+(CONTROL_HOST,)))
-    revision=digest(read_private(Path('/volume1/docker/vpn-gateway/mihomo/config.yaml'),1048576))
-    lease=fresh_dns_lease(fetch,revision)
-    from antidpi.production import validate_lease
-    validate_lease(lease)  # Time spent querying must not artificially extend a TTL.
-    atomic_private(runtime/'dns.json',canonical(lease),owner=10002)
+def renew_dns(private=PRIVATE,runtime=RUNTIME,resolver=None):
+    # The private argument is retained for installer compatibility. This path
+    # never reads the main controller credential or main VPN configuration.
+    lease=(resolver or DnsRefresher()).refresh()
+    path=runtime/'dns.json'
+    try: previous=json.loads(read_private(path))
+    except (OSError,ValueError): previous={}
+    if any(previous.get(key)!=lease[key] for key in ('expires_at','source_revision','hosts')):
+        atomic_private(path,canonical(lease),owner=10002)
     return lease
 
 
@@ -163,15 +154,17 @@ def main():
     thread=threading.Thread(target=server.serve,args=(stop,ready),daemon=True); thread.start()
     if not ready.wait(10): raise ValueError('worker_socket_unavailable')
     # Recovery ran under the process lock before any scheduler/runtime work starts.
+    def dns_monitor():
+        resolver=DnsRefresher()
+        while not stop.is_set():
+            try: renew_dns(resolver=resolver)
+            except Exception: pass  # Expired snapshots fail closed in both consumers.
+            stop.wait(1)
+    dns_thread=threading.Thread(target=dns_monitor,daemon=True); dns_thread.start()
     def monitor():
-        next_dns=0; next_repair=0
+        next_repair=0
         while not stop.is_set():
             now=time.time()
-            if now>=next_dns:
-                try:
-                    lease=renew_dns()
-                    next_dns=now+max(1,min(60,(lease['expires_at']-time.time())/2))
-                except Exception: next_dns=now+10
             if now>=next_repair and jobs.lock_state()['state']=='free':
                 lease_id=None
                 try:
@@ -196,7 +189,7 @@ def main():
             except Exception: pass  # Durable job records, not raw exceptions, are exposed.
             stop.wait(1)
     finally:
-        stop.set(); thread.join(timeout=10); monitor_thread.join(timeout=40)
+        stop.set(); thread.join(timeout=10); monitor_thread.join(timeout=40); dns_thread.join(timeout=15)
 
 
 if __name__=='__main__':

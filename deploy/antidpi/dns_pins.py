@@ -1,8 +1,9 @@
-"""Short-lived, exact-host DNS snapshots for isolated acceptance, not a resolver.
+"""Short-lived, exact-host DNS snapshots for the isolated Anti-DPI runtime.
 
 Mihomo's native hosts path sends an IPv4 SOCKS target. ByeDPI remains --no-domain:
 there is no second lookup, DNS fallback, or DNS path back through this proxy.
-No client is authorized by creating a snapshot. Renewal/production is a later gate.
+The independent host refresher supplies leases. A snapshot never authorizes
+client routing or bypasses production acceptance gates.
 """
 import copy
 import ipaddress
