@@ -193,23 +193,36 @@ def test_traffic_first_sample_has_a_bounded_read_timeout(controller: MockControl
     assert (raised.value.operation, raised.value.reason) == ("traffic", "traffic sample timed out")
 
 
-def test_rule_providers_and_delay_use_documented_read_only_endpoints(
-    controller: MockController, client: MihomoClient
-) -> None:
-    controller.add("http://mihomo:9090/providers/rules", json={"providers": {"ads": {"behavior": "domain"}}})
-    controller.add(
-        "http://mihomo:9090/proxies/WG%2FIMP/delay?url=https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=5000",
-        json={"delay": 42},
-    )
+def test_rule_providers_and_delay_use_isolated_diagnostic_endpoints() -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/providers/rules":
+            return httpx.Response(200, json={"providers": {"ads": {"behavior": "domain"}}})
+        if request.url.path == "/proxies/DASH-HEALTH-WG-IMP":
+            return httpx.Response(200, json={
+                "type": "Selector", "all": ["WG-IMP"], "now": "WG-IMP",
+                "hidden": True, "emptyFallback": "REJECT",
+            })
+        if request.url.path == "/proxies/DASH-HEALTH-WG-IMP/delay":
+            return httpx.Response(200, json={"delay": 42})
+        return httpx.Response(500)
+
+    client = MihomoClient("http://mihomo:9090", transport=httpx.MockTransport(handle))
 
     providers = run(client.rule_providers())
-    delay = run(client.proxy_delay("WG/IMP", "https://www.gstatic.com/generate_204"))
+    delay = run(client.proxy_delay("WG-IMP", "https://www.gstatic.com/generate_204"))
 
     assert providers[0].name == "ads"
     assert delay.delay_ms == 42
-    assert controller.requests[-1].url.raw_path == (
-        b"/proxies/WG%2FIMP/delay?url=https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=5000"
+    assert requests[-2].url.raw_path == (
+        b"/proxies/DASH-HEALTH-WG-IMP/delay?url=https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=5000"
     )
+    assert [request.url.path for request in requests] == [
+        "/providers/rules", "/proxies/DASH-HEALTH-WG-IMP",
+        "/proxies/DASH-HEALTH-WG-IMP/delay", "/proxies/DASH-HEALTH-WG-IMP",
+    ]
 
 
 def test_dns_lookup_uses_the_mihomo_resolver_for_an_approved_probe_target(

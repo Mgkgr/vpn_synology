@@ -63,3 +63,4 @@ Thumbs.db
 .playwright-cli/
 .playwright-mcp/
 .superpowers/
+.hermit/

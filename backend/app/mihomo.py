@@ -147,6 +147,7 @@ class MihomoClient:
         self._delay_test_host_allowlist = allowed_hosts
         self._delay_test_host_supplier = delay_test_host_supplier
         self._transport = transport
+        self._diagnostic_slots = asyncio.Semaphore(3)
 
     async def version(self) -> MihomoVersion:
         payload = await self._json("version", "GET", "version")
@@ -273,21 +274,46 @@ class MihomoClient:
             raise self._invalid_payload("traffic") from error
 
     async def proxy_delay(self, name: str, url: str) -> ProxyDelay:
+        """Check a validated singleton wrapper, never a working fallback member."""
         try:
             proxy_name = _required_text(name)
             test_url = self._validated_delay_url(url)
         except (TypeError, ValueError) as error:
             raise MihomoIntegrationError("proxy_delay", "unsafe delay test URL") from error
-        payload = await self._json(
-            "proxy_delay",
-            "GET",
-            f"proxies/{quote(proxy_name, safe='')}/delay",
-            params={"url": test_url, "timeout": str(self._delay_timeout_ms)},
-        )
-        try:
-            return ProxyDelay(delay_ms=_nonnegative_int(payload.get("delay")))
-        except (TypeError, ValueError) as error:
-            raise self._invalid_payload("proxy_delay") from error
+        if proxy_name not in {"WG-IMP", "HY2-USA"}:
+            raise MihomoIntegrationError("proxy_delay", "unsupported diagnostic outbound")
+        path = f"proxies/DASH-HEALTH-{proxy_name}"
+
+        async def validate_group() -> None:
+            group = await self._json("proxy_delay", "GET", path, timeout=3.0)
+            if (group.get("type") != "Selector" or group.get("all") != [proxy_name]
+                    or group.get("now") != proxy_name or group.get("hidden") is not True
+                    or group.get("emptyFallback") != "REJECT"):
+                raise MihomoIntegrationError("proxy_delay", "isolated probe group is invalid")
+
+        async with self._diagnostic_slots:
+            await validate_group()
+            failure = None
+            try:
+                payload = await self._json(
+                    "proxy_delay", "GET", path + "/delay",
+                    params={"url": test_url, "timeout": str(self._delay_timeout_ms)},
+                    timeout=max(self._timeout, self._delay_timeout_ms / 1000 + 2),
+                )
+            except MihomoIntegrationError as error:
+                failure = error
+            # A wrapper changed or controller lost during a request makes the
+            # observation unknown, including a claimed 503/504 probe failure.
+            await validate_group()
+            if failure is not None:
+                raise failure
+            try:
+                delay = _nonnegative_int(payload.get("delay"))
+                if not 0 < delay <= self._delay_timeout_ms:
+                    raise ValueError("invalid probe delay")
+                return ProxyDelay(delay_ms=delay)
+            except (TypeError, ValueError) as error:
+                raise self._invalid_payload("proxy_delay") from error
 
     async def control_delay(self, probe_name: str, endpoint_key: Literal["cloudflare", "google", "github"]) -> ProxyDelay:
         """Internal probes never accept user URLs or touch a working proxy's /delay."""

@@ -84,7 +84,8 @@ def https_probe(host, address, *, socks_port=None, password=None, timeout=10):
     elapsed=round((time.monotonic()-began)*1000)
     # Scheduler/process overhead must not manufacture an out-of-contract latency.
     if elapsed > 10000:
-        result.update(verdict='unknown',reason='probe_failed',http_status=None)
+        if not (result['verdict']=='transport_error' and result['reason']=='timeout'):
+            result.update(verdict='unknown',reason='probe_failed',http_status=None)
         result['latency_ms']=None
     else:
         result['latency_ms']=elapsed
