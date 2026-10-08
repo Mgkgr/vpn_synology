@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from sqlalchemy import select
 
 from app.auth import AuthenticatedSession, get_auth_service, require_admin, require_csrf
+from app.antidpi_schema import StrategyOperation
 from app.maintenance_auth import MaintenanceAuthorizationError, MaintenanceGrantService, MaintenanceStepUpThrottled, operation_hash
 from app.maintenance_client import MaintenanceBusy, MaintenanceClient, MaintenanceConflict, MaintenanceUnavailable
 from app.models import MaintenanceSubmitIntent, MaintenanceSubmissionReceipt
@@ -52,13 +53,13 @@ class CancelOperation(ClosedModel):
 
 
 class AuthorizeRequest(ClosedModel):
-    operation: Annotated[MaintenanceOperation | CancelOperation, Field(discriminator="action")]
+    operation: Annotated[MaintenanceOperation | CancelOperation | StrategyOperation, Field(discriminator="action")]
     password: Annotated[SecretStr, Field(min_length=1, max_length=1024)]
 
 
 class SubmitRequest(ClosedModel):
     job_id: JobId
-    operation: MaintenanceOperation
+    operation: Annotated[MaintenanceOperation | StrategyOperation, Field(discriminator='action')]
     grant: Annotated[SecretStr, Field(min_length=1, max_length=256)]
 
 
