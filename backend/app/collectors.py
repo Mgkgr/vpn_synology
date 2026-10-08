@@ -13,7 +13,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Protocol
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
@@ -432,7 +432,7 @@ class Collector:
         selected = await self._fallback_selection(observed_at)
         if selected is not None:
             group, outbound = selected
-            self._persist_selected_exit(observed_at, group, outbound)
+            await asyncio.to_thread(self._persist_selected_exit, observed_at, group, outbound)
             self._record_probe_events(
                 [
                     ProbeEvent(
@@ -474,7 +474,7 @@ class Collector:
             observed_at = _utc(self._clock())
             selected = await self._fallback_selection(observed_at)
             if selected is not None:
-                self._persist_selected_exit(observed_at, *selected)
+                await asyncio.to_thread(self._persist_selected_exit, observed_at, *selected)
 
             outbound = selected[1] if selected is not None else None
             urls = self._current_probe_urls()
@@ -829,10 +829,14 @@ class Collector:
 
         target = f"{self._ROUTE_STATE_PREFIX}{group}"
         with self._session_factory.begin() as session:
+            # Manual and minute observations use worker threads. Serialize the
+            # read/write pair so they cannot emit the same transition twice.
+            session.execute(text("BEGIN IMMEDIATE"))
             previous = session.scalars(
                 select(ProbeEvent)
                 .where(ProbeEvent.target == target)
                 .order_by(ProbeEvent.id.desc())
+                .limit(1)
             ).first()
             session.add(
                 ProbeEvent(
