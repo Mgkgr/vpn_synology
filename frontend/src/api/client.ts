@@ -26,6 +26,7 @@ import type {
   GeoUpdate,
 } from './types'
 import type { CancelOperation, MaintenanceInventory, MaintenanceJob, MaintenanceOperation } from './maintenanceTypes'
+import type { StrategyOperation, StrategySnapshot } from './antidpiTypes'
 
 export class ApiError extends Error {
   constructor(public readonly status: number, message: string) {
@@ -84,12 +85,13 @@ async function openSession(path: '/auth/login', username: string, password: stri
 }
 
 export const api = {
+  antidpiStrategies: () => request<StrategySnapshot>('/antidpi/strategies', { signal: AbortSignal.timeout(12_000) }),
   maintenanceComponents: () => request<MaintenanceInventory>('/maintenance/components', { signal: AbortSignal.timeout(12_000) }),
   maintenanceJobs: () => request<{ available: boolean; jobs: MaintenanceJob[] }>('/maintenance/jobs', { signal: AbortSignal.timeout(12_000) }),
   maintenanceJob: (jobId: string) => request<MaintenanceJob>(`/maintenance/jobs/${encodeURIComponent(jobId)}`, { signal: AbortSignal.timeout(12_000) }),
   checkComponentReleases: () => request<{ queued: boolean }>('/maintenance/check', { method: 'POST', body: '{}', signal: AbortSignal.timeout(12_000) }),
-  authorizeMaintenance: (operation: MaintenanceOperation | CancelOperation, password: string) => request<{ grant: string; expires_in: number }>('/maintenance/authorize', { method: 'POST', body: JSON.stringify({ operation, password }), signal: AbortSignal.timeout(12_000) }),
-  submitMaintenance: (jobId: string, operation: MaintenanceOperation, grant: string) => request<MaintenanceJob>('/maintenance/jobs', { method: 'POST', body: JSON.stringify({ job_id: jobId, operation, grant }), signal: AbortSignal.timeout(12_000) }),
+  authorizeMaintenance: (operation: MaintenanceOperation | CancelOperation | StrategyOperation, password: string) => request<{ grant: string; expires_in: number }>('/maintenance/authorize', { method: 'POST', body: JSON.stringify({ operation, password }), signal: AbortSignal.timeout(12_000) }),
+  submitMaintenance: (jobId: string, operation: MaintenanceOperation | StrategyOperation, grant: string) => request<MaintenanceJob>('/maintenance/jobs', { method: 'POST', body: JSON.stringify({ job_id: jobId, operation, grant }), signal: AbortSignal.timeout(12_000) }),
   cancelMaintenance: (jobId: string, grant: string) => request<MaintenanceJob>(`/maintenance/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST', body: JSON.stringify({ grant }), signal: AbortSignal.timeout(12_000) }),
   async restoreSession(): Promise<AuthSession> {
     const session = await request<AuthSession>('/auth/csrf', {}, false)

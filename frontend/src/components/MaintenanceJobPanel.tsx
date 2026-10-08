@@ -21,6 +21,15 @@ const REASONS: Record<string, string> = {
   insufficient_resources: 'Недостаточно подтверждённых ресурсов для безопасной операции.',
   schema_migration_unverified: 'Совместимость базы данных и путь отката не подтверждены.',
   release_unverified: 'Эта версия ещё не разрешена для установки.',
+  strategy_verification_failed: 'Проверка после применения не прошла. Предыдущая конфигурация возвращена; её доступность этим не подтверждается.',
+  strategy_infrastructure_unavailable: 'Условия безопасной проверки Anti-DPI не подтверждены. Стратегия не считается неисправной.',
+  strategy_dns_changed: 'DNS изменился во время сравнения. Применение отменено; нужна новая проверка.',
+  strategy_candidate_failed: 'Кандидат не прошёл три успешные проверки. Текущая стратегия сохранена.',
+  strategy_no_candidate: 'Нет подходящей предыдущей или новой стратегии.',
+  strategy_backup_unavailable: 'Зашифрованная копия не подтверждена. Применение не начато.',
+  strategy_deadline: 'Истёк лимит времени задания.',
+  strategy_attempt_limit: 'Достигнут предел числа попыток.',
+  strategy_policy_revoked: 'Разрешение автоматической проверки отозвано.',
 }
 export function maintenanceDate(value: number | null | undefined) {
   return value ? new Date(value * 1000).toLocaleString('ru-RU') : 'Нет данных'
@@ -33,6 +42,7 @@ export function MaintenanceJobPanel({ job, onCancel }: { job: MaintenanceJob; on
         <dt>Администратор</dt><dd>{job.actor ?? 'Уточняется'}</dd>
         <dt>Начало</dt><dd>{maintenanceDate(job.started_at)}</dd><dt>Завершение</dt><dd>{maintenanceDate(job.finished_at)}</dd></dl>
       {job.error_code && <p role="alert">{REASONS[job.error_code] ?? 'Операция не завершена. Нужна проверка состояния; повторный запуск автоматически не выполняется.'}</p>}
+      {job.strategy && <p role="status">Попыток завершено: {job.strategy.completed} · предел {job.strategy.limit}. {({ queued: 'Ожидает запуска', checking: 'Проверяются стратегии', backup: 'Создаётся копия', applying: 'Применяется кандидат', verifying: 'Проверяется реальный вход Anti-DPI', verified: 'Проверка после применения успешна', rollback: 'Возвращается конфигурация', finished: 'Проверки закончены' } as Record<string, string>)[job.strategy.step] ?? 'Проверка условий'}</p>}
       {['unknown', 'needs_reconcile'].includes(job.phase) && <p>Не запускайте повторно. Страница проверяет прежний ID задания; закрытие вкладки не отменяет операцию.</p>}
       {job.maintenance_until && !FINISHED_PHASES.has(job.phase) && <p>Плановое окно до {maintenanceDate(job.maintenance_until)}. Это не подтверждение исправности VPN; окно автоматически не продлевается.</p>}
       {job.cancel_requested && <p>Отмена запрошена; ожидается безопасное завершение текущего этапа.</p>}
