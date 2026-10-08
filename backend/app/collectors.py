@@ -751,8 +751,15 @@ class Collector:
             )
             return
 
+        await asyncio.to_thread(self._persist_peer_snapshots, contract.clients, observed_at)
+
+    def _persist_peer_snapshots(self, clients, observed_at: datetime) -> None:
         with self._session_factory.begin() as session:
-            for client in contract.clients:
+            # SQLite's legacy transaction mode does not start a transaction for
+            # SAVEPOINT. Without an explicit BEGIN, each peer savepoint commits
+            # separately, causing many disk syncs and a partially saved batch.
+            session.execute(text("BEGIN IMMEDIATE"))
+            for client in clients:
                 try:
                     record_peer_snapshot(
                         session,
