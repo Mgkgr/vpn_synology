@@ -5,6 +5,7 @@ import tempfile
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from test_antidpi_production import config,pins,Child
+from test_antidpi_dns_isolation import Control
 
 
 class RuntimeServiceTests(unittest.TestCase):
@@ -27,7 +28,7 @@ class RuntimeServiceTests(unittest.TestCase):
         def start(argv):
             value=Child(argv); children.append(value); return value
         with tempfile.TemporaryDirectory() as tmp:
-            service=self.m.AuthService(Path(tmp),start=start,validate=lambda argv: checked.append(argv))
+            service=self.m.AuthService(Path(tmp),start=start,validate=lambda argv: checked.append(argv),control=Control())
             service.tick('s'*48,config(),pins(),now=1000)
             lease=pins(); lease.update(created_at=1050,expires_at=1150)
             changed=config(); changed['selections']['instagram']='split-1'
@@ -36,10 +37,10 @@ class RuntimeServiceTests(unittest.TestCase):
             self.assertEqual(len(checked),1)
             lease['hosts']['discord.com']=['162.159.138.232']
             service.tick('s'*48,changed,lease,now=1051)
-            self.assertEqual(len(children),2)
-            self.assertTrue(children[0].stopped)
+            self.assertEqual(len(children),1)
+            self.assertFalse(children[0].stopped)
             with self.assertRaises(ValueError): service.tick('s'*48,changed,lease,now=1150)
-            self.assertTrue(children[1].stopped)
+            self.assertTrue(children[0].stopped)
 
     def test_invalid_full_auth_config_never_starts_listener(self):
         children=[]

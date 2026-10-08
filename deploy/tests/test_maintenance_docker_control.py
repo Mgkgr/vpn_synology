@@ -106,6 +106,20 @@ class DockerControlTests(unittest.TestCase):
         other['runtime']['mounts'][0]['RW']=True
         self.assertNotEqual(self.m.runtime_hash(row),self.m.runtime_hash(other))
 
+    def test_unique_environment_order_is_not_configuration_drift(self):
+        row=copy.deepcopy(self.rows['dashboard'])
+        row['runtime']['config']={'Env':['PYTHONPATH=/opt/vpn','SECRET=kept-in-hash','PYTHONDONTWRITEBYTECODE=1']}
+        other=copy.deepcopy(row);other['runtime']['config']['Env'].reverse()
+        self.assertEqual(self.m.runtime_hash(row),self.m.runtime_hash(other))
+        other['runtime']['config']['Env'][1]='SECRET=changed'
+        self.assertNotEqual(self.m.runtime_hash(row),self.m.runtime_hash(other))
+
+    def test_duplicate_environment_order_remains_significant(self):
+        row=copy.deepcopy(self.rows['dashboard'])
+        row['runtime']['config']={'Env':['SETTING=first','SETTING=last']}
+        other=copy.deepcopy(row);other['runtime']['config']['Env'].reverse()
+        self.assertNotEqual(self.m.runtime_hash(row),self.m.runtime_hash(other))
+
 
 if __name__ == '__main__':
     unittest.main()

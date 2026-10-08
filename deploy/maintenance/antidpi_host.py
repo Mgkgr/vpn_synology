@@ -116,5 +116,8 @@ def compose_runtime(code_path, runtime_path, engine_image, socks_image):
                        {'type':'bind','source':runtime_path,'target':'/run/antidpi','read_only':True}],
         }
     services['antidpi']['network_mode']='bridge'
-    services['socks'].update(network_mode='service:antidpi',depends_on=['antidpi'])
+    # DSM Compose may not resolve service: with up --no-deps socks. Docker
+    # resolves the fixed container name; DockerControl also verifies its live
+    # namespace inode after every recreate (never just this string).
+    services['socks'].update(network_mode='container:vpn-antidpi',depends_on=['antidpi'])
     return {'name':'vpn-antidpi','services':services}

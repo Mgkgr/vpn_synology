@@ -13,6 +13,9 @@ SECRETS_DIR=${SECRETS_DIR:-$PROJECT_DIR/deploy/secrets}
 [ "$(id -u)" = 0 ] || { echo 'must run as root' >&2; exit 1; }
 [ -x "$DOCKER_BIN" ] || { echo "Docker binary is unavailable: $DOCKER_BIN" >&2; exit 1; }
 [ -f "$PROJECT_DIR/deploy/dashboard.env" ] || { echo 'dashboard.env is missing' >&2; exit 1; }
+# /run is ephemeral after reboot. Keep the directory inode while mounted;
+# never enable the worker or an Auto policy as part of dashboard deployment.
+/usr/bin/python3 "$PROJECT_DIR/deploy/scripts/prepare-maintenance-socket.py"
 install -d -m 0700 -o "$APP_UID" -g "$APP_GID" "$SECRETS_DIR"
 
 # Migrate the two runtime secrets out of dashboard.env exactly once. The

@@ -14,6 +14,8 @@ services:
       - /volume1/docker/vpn-gateway/mihomo/GeoSite.dat:/geodata/GeoSite.dat:ro
       - /volume1/docker/vpn-gateway/mihomo/rules:/gateway/rules:rw
       - ./deploy/secrets:/run/secrets:ro
+      # Scoped IPC only: no Docker socket or private worker data.
+      - /run/vpn-maintenance:/run/vpn-maintenance:ro
     read_only: true
     tmpfs:
       - /tmp:mode=1777,noexec,nosuid,size=64m

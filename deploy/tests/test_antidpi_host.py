@@ -72,7 +72,10 @@ class HostContractTests(unittest.TestCase):
             self.assertEqual(service['cap_drop'],['ALL'])
             self.assertTrue(service['read_only'])
             self.assertTrue(all(mount['read_only'] for mount in service['volumes']))
-        self.assertEqual(value['services']['socks']['network_mode'],'service:antidpi')
+        # DSM Compose can pass service: literally during up --no-deps socks.
+        # The engine understands container: directly, including a stable name.
+        self.assertEqual(value['services']['socks']['network_mode'],'container:vpn-antidpi')
+        self.assertEqual(value['services']['socks']['depends_on'],['antidpi'])
         self.assertNotIn('host',str(value['services']['antidpi'].get('network_mode')))
 
 

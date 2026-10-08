@@ -42,6 +42,13 @@ def runtime_hash(row):
         value['mounts'] = sorted(value['mounts'], key=canonical)
     config = value.get('config')
     if isinstance(config, dict):
+        environment = config.get('Env')
+        if (isinstance(environment, list)
+                and all(isinstance(item, str) and '=' in item and item.split('=', 1)[0] for item in environment)
+                and len({item.split('=', 1)[0] for item in environment}) == len(environment)):
+            # Compose can reorder unique variables during recreation. Their
+            # values still enter the hash; duplicate names keep original order.
+            config['Env'] = sorted(environment)
         if config.get('Hostname') == row.get('id', '')[:12]:
             config['Hostname'] = '<container-id>'
         labels = config.get('Labels')

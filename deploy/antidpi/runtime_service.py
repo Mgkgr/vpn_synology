@@ -15,6 +15,7 @@ from .production import (HOSTS, PORTS, ARGUMENTS, CONTROL_HOST, EngineSupervisor
                          stop_child, validate_config, validate_lease, _start)
 from .runtime import MIHOMO, probe_socks, validate_secret
 from .probe import https_probe
+from .auth_reload import MihomoUnixControl
 
 RUNTIME=Path('/run/antidpi')
 
@@ -33,27 +34,40 @@ def runtime_files():
             validate_lease(json.loads(read_file(RUNTIME/'dns.json'))))
 
 
-def attestation_matches(value,config,now=None):
+def dns_context(lease):
+    return hashlib.sha256(canonical(dict(source_revision=lease['source_revision'],hosts=lease['hosts']))).hexdigest()
+
+
+def attestation_matches(value,config,now=None,lease=None):
     now=time.time() if now is None else now
     return (isinstance(value,dict) and value.get('config')==config
+            and (lease is None or value.get('dns_context')==dns_context(lease))
             and type(value.get('checked_at')) in (int,float) and 0<=now-value['checked_at']<=10)
 
 
-def attest(role,config):
+def attest(role,config,lease):
     path=Path('/tmp/'+role+'-state.json'); candidate=path.with_suffix('.new')
     fd=os.open(str(candidate),os.O_WRONLY|os.O_CREAT|os.O_TRUNC|getattr(os,'O_NOFOLLOW',0),0o600)
-    with os.fdopen(fd,'wb') as stream: stream.write(canonical(dict(config=config,checked_at=time.time())))
+    with os.fdopen(fd,'wb') as stream:
+        stream.write(canonical(dict(config=config,dns_context=dns_context(lease),checked_at=time.time())))
     os.replace(str(candidate),str(path))
 
 
 class EngineService:
-    def __init__(self,start=_start): self.manager=EngineSupervisor(start=start)
+    def __init__(self,start=_start): self.manager=EngineSupervisor(start=start);self.hosts=None
     def tick(self,config,lease,now=None):
         try:
-            validate_lease(lease,now); self.manager.reconcile(config)
+            validate_lease(lease,now);validate_config(config)
+            if self.hosts is not None:
+                for sid,host in HOSTS.items():
+                    if self.hosts[host]!=lease['hosts'][host]:
+                        previous=self.manager.children.pop(sid,None)
+                        if previous: stop_child(previous[1])
+            self.manager.reconcile(config)
+            self.hosts={host:list(values) for host,values in lease['hosts'].items()}
         except Exception:
             self.stop(); raise
-    def stop(self): self.manager.stop()
+    def stop(self): self.manager.stop();self.hosts=None
 
 
 def validate_mihomo(argv):
@@ -63,28 +77,39 @@ def validate_mihomo(argv):
 
 
 class AuthService:
-    def __init__(self,directory,start=_start,validate=validate_mihomo):
+    def __init__(self,directory,start=_start,validate=validate_mihomo,control=None):
         self.directory,self.start,self.validate=directory,start,validate
-        self.child,self.fingerprint=None,None
+        self.control=control or MihomoUnixControl(directory/'control.sock')
+        self.child,self.fingerprint,self.secret_hash=None,None,None
     def tick(self,secret,config,lease,now=None):
         try:
-            fingerprint=auth_fingerprint(config,lease,now)+hashlib.sha256(validate_secret(secret).encode()).hexdigest()
+            secret_hash=hashlib.sha256(validate_secret(secret).encode()).hexdigest()
+            fingerprint=auth_fingerprint(config,lease,now)+secret_hash
             if self.child is not None and self.child.poll() is None and fingerprint==self.fingerprint:
                 return
-            # Close old DNS-bound connections BEFORE accepting a replacement.
-            self.stop()
             self.directory.mkdir(mode=0o700,parents=True,exist_ok=True)
             path=self.directory/'config.json'
-            fd=os.open(str(path),os.O_WRONLY|os.O_CREAT|os.O_TRUNC|getattr(os,'O_NOFOLLOW',0),0o600)
-            with os.fdopen(fd,'wb') as stream: stream.write(canonical(auth_config(secret,config,lease,now)))
-            argv=[MIHOMO,'-d',str(self.directory),'-f',str(path)]
-            self.validate(argv)
-            self.child=self.start(argv); self.fingerprint=fingerprint
+            value=auth_config(secret,config,lease,now)
+            value['external-controller-unix']=str(self.directory/'control.sock')
+            candidate=self.directory/'candidate.json'
+            fd=os.open(str(candidate),os.O_WRONLY|os.O_CREAT|os.O_TRUNC|getattr(os,'O_NOFOLLOW',0),0o600)
+            with os.fdopen(fd,'wb') as stream: stream.write(canonical(value))
+            self.validate([MIHOMO,'-d',str(self.directory),'-f',str(candidate)])
+            running=self.child is not None and self.child.poll() is None
+            if not running or secret_hash!=self.secret_hash:
+                self.stop()
+                os.replace(str(candidate),str(path))
+                self.child=self.start([MIHOMO,'-d',str(self.directory),'-f',str(path)])
+            # DNS change reloads hosts/rules, not the shared process. The engine
+            # supervisor closes only the affected service's old DNS-bound flows.
+            self.control.apply(value)
+            if candidate.exists(): os.replace(str(candidate),str(path))
+            self.fingerprint,self.secret_hash=fingerprint,secret_hash
         except Exception:
             self.stop(); raise
     def stop(self):
         if self.child is not None: stop_child(self.child)
-        self.child,self.fingerprint=None,None
+        self.child,self.fingerprint,self.secret_hash=None,None,None
 
 
 def run_service(role):
@@ -103,7 +128,7 @@ def run_service(role):
                     service.tick(read_file(RUNTIME/'socks_password',128).decode('ascii'),config,lease)
                 if all(probe_socks(port) for port in PORTS.values()):
                     if role=='engine' or probe_socks(1080,read_file(RUNTIME/'socks_password',128).decode('ascii')):
-                        attest(role,config)
+                        attest(role,config,lease)
             except (OSError,ValueError,subprocess.SubprocessError):
                 service.stop()  # No bypass and no secret exception tracebacks.
             time.sleep(0.5)
@@ -152,7 +177,7 @@ def main():
             if not probe_socks(1080,secret): return 1
         if args[0]=='state':
             value=json.loads(read_file(Path('/tmp/'+args[1]+'-state.json')))
-            if not attestation_matches(value,config): return 1
+            if not attestation_matches(value,config,lease=lease): return 1
             print(json.dumps(value))
         return 0
     if len(args)==2 and args[0]=='probe' and len(args[1])<=8192:
