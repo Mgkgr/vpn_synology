@@ -6,11 +6,12 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, model_validator
 from sqlalchemy import select
 
 from app.auth import AuthenticatedSession, get_auth_service, require_admin, require_csrf
 from app.antidpi_schema import StrategyOperation
+from app.profile_schema import ProfileOperation, ProfileProgress
 from app.maintenance_auth import MaintenanceAuthorizationError, MaintenanceGrantService, MaintenanceStepUpThrottled, operation_hash
 from app.maintenance_client import MaintenanceBusy, MaintenanceClient, MaintenanceConflict, MaintenanceUnavailable
 from app.models import MaintenanceSubmitIntent, MaintenanceSubmissionReceipt
@@ -53,13 +54,13 @@ class CancelOperation(ClosedModel):
 
 
 class AuthorizeRequest(ClosedModel):
-    operation: Annotated[MaintenanceOperation | CancelOperation | StrategyOperation, Field(discriminator="action")]
+    operation: Annotated[MaintenanceOperation | CancelOperation | StrategyOperation | ProfileOperation, Field(discriminator="action")]
     password: Annotated[SecretStr, Field(min_length=1, max_length=1024)]
 
 
 class SubmitRequest(ClosedModel):
     job_id: JobId
-    operation: Annotated[MaintenanceOperation | StrategyOperation, Field(discriminator='action')]
+    operation: Annotated[MaintenanceOperation | StrategyOperation | ProfileOperation, Field(discriminator='action')]
     grant: Annotated[SecretStr, Field(min_length=1, max_length=256)]
 
 
@@ -110,13 +111,22 @@ def _not_started(job_id: str) -> dict:
     return {'job_id': job_id, 'phase': 'not_started', 'cancel_allowed': False}
 
 
+def _safe_job(result):
+    if isinstance(result,dict) and 'profile' in result:
+        try:
+            result={**result,'profile':ProfileProgress.model_validate(result['profile']).model_dump(mode='json')}
+        except ValidationError:
+            raise MaintenanceUnavailable() from None
+    return result
+
+
 async def _status(request: Request, job_id: str) -> dict:
     with request.app.state.runtime.session_factory() as session:
         receipt = session.get(MaintenanceSubmissionReceipt, (job_id, 'submit'))
         if receipt and receipt.outcome == 'rejected':
             return _not_started(job_id)
     try:
-        return await _client(request).get_job(job_id)
+        return _safe_job(await _client(request).get_job(job_id))
     except (MaintenanceUnavailable, MaintenanceConflict):
         if _intent_exists(request, job_id):
             return _unknown(job_id)
@@ -177,7 +187,7 @@ def build_maintenance_router() -> APIRouter:
         if not first:
             return await _status(request, payload.job_id)
         try:
-            result = await _client(request).submit(payload.job_id, operation, principal.username)
+            result = _safe_job(await _client(request).submit(payload.job_id, operation, principal.username))
             _receipt(request, payload.job_id, 'accepted')
             return result
         except (MaintenanceBusy, MaintenanceConflict):

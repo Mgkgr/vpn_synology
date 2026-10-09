@@ -24,6 +24,7 @@ from app.site_probe_api import build_site_probe_router
 from app.site_probes import SiteProbeCollector, SiteProbeService, register_site_probe_jobs
 from app.maintenance_api import build_maintenance_router, install_maintenance_handlers
 from app.antidpi_api import build_antidpi_router
+from app.profile_api import build_profile_router
 from app.maintenance_client import MaintenanceClient
 from app.kuma_push import KumaPublisher, KumaPushClient, load_push_tokens, register_kuma_jobs
 from app.outbound_health import HealthService
@@ -235,6 +236,7 @@ def create_app(
     application.include_router(build_site_probe_router())
     application.include_router(build_maintenance_router())
     application.include_router(build_antidpi_router())
+    application.include_router(build_profile_router())
     install_maintenance_handlers(application)
 
     @application.get("/{path:path}", include_in_schema=False)
