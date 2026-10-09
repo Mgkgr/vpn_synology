@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import sqlite3
 import threading
 import time
 import urllib.error
@@ -150,6 +151,34 @@ def assemble_profiles(jobs):
     return ProfileRunner(jobs,ProfileDrafts(PRIVATE/'profile-drafts'),ProfileHost(jobs,private=PRIVATE))
 
 
+def monitor_runtime(stop,jobs,adapter,control,clock=time.time):
+    next_repair=0
+    while not stop.is_set():
+        now=clock()
+        try:
+            free=now>=next_repair and jobs.lock_state()['state']=='free'
+        except sqlite3.OperationalError:
+            # A slow fsync/other writer may exceed SQLite's bounded busy wait.
+            # Do not lose the monitor thread or assume ownership of that lock.
+            free=False
+        if free:
+            lease_id=None
+            try:
+                rows=control.inventory()
+                if rows['antidpi']['running'] and (rows['socks']['namespace_stale'] or not rows['socks']['running']):
+                    lease_id=jobs.acquire_writer('strategies')
+                    control.recreate('socks'); next_repair=now+300
+                    jobs.release_writer(lease_id,'complete'); lease_id=None
+            except JobBusy: pass
+            except Exception:
+                next_repair=now+300
+                if lease_id:
+                    try: jobs.release_writer(lease_id,'uncertain')
+                    except Exception: pass
+        adapter.refresh()
+        stop.wait(5)
+
+
 def main():
     if os.name!='posix' or os.geteuid()!=0: raise ValueError('linux_root_required')
     prepare_socket_parent()  # Do not remove this bind-mounted directory on service stop.
@@ -169,27 +198,7 @@ def main():
             except Exception: pass  # Expired snapshots fail closed in both consumers.
             stop.wait(1)
     dns_thread=threading.Thread(target=dns_monitor,daemon=True); dns_thread.start()
-    def monitor():
-        next_repair=0
-        while not stop.is_set():
-            now=time.time()
-            if now>=next_repair and jobs.lock_state()['state']=='free':
-                lease_id=None
-                try:
-                    rows=control.inventory()
-                    if rows['antidpi']['running'] and (rows['socks']['namespace_stale'] or not rows['socks']['running']):
-                        lease_id=jobs.acquire_writer('strategies')
-                        control.recreate('socks'); next_repair=now+300
-                        jobs.release_writer(lease_id,'complete'); lease_id=None
-                except JobBusy: pass
-                except Exception:
-                    next_repair=now+300
-                    if lease_id:
-                        try: jobs.release_writer(lease_id,'uncertain')
-                        except Exception: pass
-            adapter.refresh()
-            stop.wait(5)
-    monitor_thread=threading.Thread(target=monitor,daemon=True); monitor_thread.start()
+    monitor_thread=threading.Thread(target=monitor_runtime,args=(stop,jobs,adapter,control),daemon=True); monitor_thread.start()
     loop=JobLoop(runner,profiles=profiles)
     try:
         while not stop.is_set() and thread.is_alive():

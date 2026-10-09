@@ -1,10 +1,11 @@
 import importlib
 import json
+import sqlite3
 from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from test_maintenance_backups import MemoryRepository
 from test_antidpi_production import config
 from maintenance.store import JobStore
@@ -24,6 +25,39 @@ class HostServiceTests(unittest.TestCase):
         for url in ('https://evil.example:9090','http://8.8.8.8:9090','http://198.18.1.1:9090',
                     'http://172.24.0.2:22','http://user:pass@172.24.0.2:9090','http://172.24.0.2:9090/a'):
             with self.assertRaises(ValueError): self.m.validate_controller(dict(valid,url=url))
+
+    def test_runtime_monitor_survives_busy_database_and_repairs_on_next_tick(self):
+        stop=Mock();stop.is_set.side_effect=[False,False,True]
+        jobs=Mock();jobs.lock_state.side_effect=[sqlite3.OperationalError('database is locked'),dict(state='free')]
+        jobs.acquire_writer.return_value='test-lease'
+        control=Mock();control.inventory.return_value=dict(
+            antidpi=dict(running=True),socks=dict(running=True,namespace_stale=True))
+        adapter=Mock()
+        self.m.monitor_runtime(stop,jobs,adapter,control,clock=lambda:1000)
+        control.recreate.assert_called_once_with('socks')
+        jobs.release_writer.assert_called_once_with('test-lease','complete')
+        self.assertEqual(adapter.refresh.call_count,2)
+        self.assertEqual(stop.wait.call_args_list,[((5,),),((5,),)])
+
+    def test_runtime_monitor_preserves_uncertain_lock_after_recreate_error(self):
+        stop=Mock();stop.is_set.side_effect=[False,False,True]
+        jobs=Mock();jobs.lock_state.return_value=dict(state='free')
+        jobs.acquire_writer.return_value='test-lease'
+        control=Mock();control.inventory.return_value=dict(
+            antidpi=dict(running=True),socks=dict(running=True,namespace_stale=True))
+        control.recreate.side_effect=RuntimeError('lost acknowledgment')
+        self.m.monitor_runtime(stop,jobs,Mock(),control,clock=lambda:1000)
+        control.recreate.assert_called_once_with('socks')
+        jobs.release_writer.assert_called_once_with('test-lease','uncertain')
+
+    def test_runtime_monitor_never_mutates_while_another_job_holds_lock(self):
+        stop=Mock();stop.is_set.side_effect=[False,True]
+        jobs=Mock();jobs.lock_state.return_value=dict(state='held')
+        control=Mock()
+        self.m.monitor_runtime(stop,jobs,Mock(),control,clock=lambda:1000)
+        control.inventory.assert_not_called()
+        control.recreate.assert_not_called()
+        jobs.acquire_writer.assert_not_called()
 
     def test_changed_installed_source_never_reuses_accepted_identity(self):
         with tempfile.TemporaryDirectory() as tmp:
