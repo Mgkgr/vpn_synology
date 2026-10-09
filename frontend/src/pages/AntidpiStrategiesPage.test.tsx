@@ -27,6 +27,32 @@ beforeEach(()=>{
 })
 afterEach(()=>{cleanup();vi.restoreAllMocks()})
 
+it('identifies the configured engine without presenting ByeDPI as Zapret', async()=>{
+  mount()
+  const engine = await screen.findByRole('region', {name:'Движок обхода DPI'})
+  expect(within(engine).getByRole('heading', {name:'ByeDPI'})).toBeVisible()
+  expect(within(engine).getByText(/не Zapret/)).toBeVisible()
+})
+
+it('reveals an existing blocking job and its progress after returning to the page', async()=>{
+  vi.mocked(api.maintenanceJobs).mockResolvedValue({available:true,jobs:[{job_id:jobId,phase:'preflight',cancel_allowed:true}]})
+  vi.mocked(api.maintenanceJob).mockResolvedValue({job_id:jobId,phase:'preflight',cancel_allowed:true,
+    strategy:{step:'checking',completed:8,limit:60,kind:'manual',results:[]}})
+  mount()
+  fireEvent.click(await screen.findByRole('button',{name:'Показать текущее задание'}))
+  expect(await screen.findByText(/Попыток завершено: 8/)).toBeVisible()
+  expect(screen.getByRole('button',{name:'Проверить YouTube сейчас'})).toBeDisabled()
+  expect(screen.getByRole('button',{name:'Отменить задание'})).toBeEnabled()
+  expect(api.submitMaintenance).not.toHaveBeenCalled()
+})
+
+it('explains unavailable job status instead of silently disabling all controls', async()=>{
+  vi.mocked(api.maintenanceJobs).mockResolvedValue({available:false,jobs:[]})
+  mount()
+  expect(await screen.findByRole('alert')).toHaveTextContent(/состояние заданий/)
+  expect(screen.getByRole('button',{name:'Проверить YouTube сейчас'})).toBeDisabled()
+})
+
 it('separates active strategy from draft and never probes on mount',async()=>{
   mount()
   expect(await screen.findByText('Сбой подтверждается · 1/3')).toBeVisible()

@@ -41,7 +41,8 @@ export function AntidpiStrategiesPage() {
     }
   }, [job.data?.phase, client])
   const observedJob: MaintenanceJob | null = jobId ? job.data ?? { job_id: jobId, phase: 'unknown', cancel_allowed: false } : null
-  const busy = jobs.isLoading || !!jobs.error || !jobs.data?.available || jobs.data.jobs.some(item => !FINISHED_PHASES.has(item.phase)) || (!!observedJob && !FINISHED_PHASES.has(observedJob.phase))
+  const activeJobs = jobs.data?.jobs.filter(item => !FINISHED_PHASES.has(item.phase)) ?? []
+  const busy = jobs.isLoading || !!jobs.error || !jobs.data?.available || activeJobs.length > 0 || (!!observedJob && !FINISHED_PHASES.has(observedJob.phase))
   function prepare(operation: StrategyOperation, name: string) {
     if (busy || !snapshot.data?.can_manage) return
     setConfirmation({ jobId: crypto.randomUUID().replace(/-/g, ''), operation, name })
@@ -64,9 +65,13 @@ export function AntidpiStrategiesPage() {
   const data = snapshot.data
   return <>
     <main className="page components-page" inert={confirmation ? true : undefined}>
-      <header className="page-header"><div><p className="eyebrow">02 / МАРШРУТЫ / ANTI-DPI</p><h1>Стратегии обхода</h1><p>ByeDPI · отдельная стратегия для каждого сервиса.</p></div><a href="/routes">Все маршруты</a></header>
+      <header className="page-header"><div><p className="eyebrow">09 / ОБХОД DPI</p><h1>Обход DPI</h1><p>Стратегии, проверки и автоматическая смена.</p></div><a href="/routes">VPN-маршруты</a></header>
+      {data?.available && <section className="panel" aria-label="Движок обхода DPI"><div className="section-heading"><h2>ByeDPI</h2><span>Текущий движок</span></div><div className="maintenance-body"><p>В этой конфигурации используется ByeDPI, не Zapret / Zapret2. Это отдельный SOCKS-прокси для обхода DPI; его стратегии не взаимозаменяемы со стратегиями Zapret.</p></div></section>}
       <p className="maintenance-hint">Проверяем только HTTPS по TCP/443 с проверкой сертификата. Успех не подтверждает видео, звонки, приложения или UDP. Основной и резервный VPN не переключаются.</p>
       {notice && <p role="status" className="maintenance-notice">{notice}</p>}
+      {jobs.isLoading && <p role="status" className="maintenance-notice">Проверяем состояние заданий…</p>}
+      {!jobs.isLoading && (jobs.error || !jobs.data?.available) && <p role="alert" className="maintenance-notice">Не удалось получить состояние заданий. Запуск новых операций заблокирован до восстановления связи с исполнителем.</p>}
+      {activeJobs.length > 0 && <section className="panel" aria-label="Текущее обслуживание"><div className="maintenance-body"><p>На NAS уже выполняется или ожидает проверки задание. Новые операции временно недоступны.</p>{activeJobs.filter(item => item.job_id !== jobId).map(item => <button key={item.job_id} type="button" className="secondary-button" onClick={() => setParams({ job: item.job_id })}>Показать текущее задание</button>)}</div></section>}
       {data?.capabilities.blockers.length ? <section className="panel"><div className="maintenance-body"><h2>Что ещё не подтверждено</h2><ul>{data.capabilities.blockers.map(item => <li key={item}>{BLOCKERS[item] ?? 'Условие безопасности не подтверждено.'}</li>)}</ul><p>Автосмена на NAS не считается включённой, пока эти проверки не завершены.</p></div></section> : null}
       {data?.available && !data.can_manage && <p className="maintenance-notice">Режим просмотра. Управление стратегиями доступно владельцу.</p>}
       <AsyncState loading={snapshot.isLoading} error={snapshot.error} empty={!data?.services.length} emptyLabel="Нет подтверждённого состояния стратегий на NAS.">

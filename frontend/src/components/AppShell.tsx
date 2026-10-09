@@ -1,5 +1,5 @@
 import type { PropsWithChildren } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 
 import { api } from '../api/client'
 
@@ -12,10 +12,12 @@ const links = [
   ['/journal', 'Журнал', '06'],
   ['/administrators', 'Доступ', '07'],
   ['/system/components', 'Система', '08'],
+  ['/routes/antidpi/strategies', 'Обход DPI', '09'],
 ] as const
 
 export function AppShell({ children }: PropsWithChildren) {
   const navigate = useNavigate()
+  const { pathname } = useLocation()
 
   async function handleLogout() {
     try {
@@ -37,7 +39,7 @@ export function AppShell({ children }: PropsWithChildren) {
           <ul>
             {links.map(([to, label, index]) => (
               <li key={to}>
-                <NavLink to={to} className={({ isActive }) => isActive ? 'nav-link is-active' : 'nav-link'}>
+                <NavLink to={to} end={to === '/routes' && pathname.startsWith('/routes/antidpi/')} className={({ isActive }) => isActive ? 'nav-link is-active' : 'nav-link'}>
                   <span aria-hidden="true">{index}</span>{label}
                 </NavLink>
               </li>
