@@ -6,7 +6,8 @@ import re
 TARGETS = ('WG-IMP', 'HY2-USA')
 PROBES = {'cloudflare': ('https://cp.cloudflare.com/generate_204', 204),
           'google': ('https://www.google.com/generate_204', 204),
-          'github': ('https://api.github.com/', 200)}
+          # Shared VPN exits routinely exhaust the unauthenticated API quota.
+          'github': ('https://github.com/robots.txt', 200)}
 ACTIONS = ('profile_check', 'profile_apply')
 REASONS = ('timeout', 'tls_failed', 'connect_failed', 'http_status', 'invalid_response', 'probe_failed')
 

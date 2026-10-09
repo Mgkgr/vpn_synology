@@ -78,5 +78,9 @@ class ProfileHostTests(unittest.TestCase):
         host._command=Mock(side_effect=['b'*64,job,'','b'*64])
         with self.assertRaises(self.m.ProbeCleanupUnconfirmed): host.cleanup_probe(job)
 
+    def test_fixed_github_probe_does_not_depend_on_shared_api_rate_limit(self):
+        # Real NAS response: API 403, X-RateLimit-Remaining: 0; HTTPS robots: 200.
+        self.assertEqual(self.m.PROBES['github'],('https://github.com/robots.txt',200))
+
 
 if __name__=='__main__': unittest.main()
