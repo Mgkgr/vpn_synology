@@ -24,7 +24,7 @@ keywords = ["vless"]
 [[rules.allowlists]]
 description = "Reviewed synthetic UUID in the isolated migration test"
 condition = "AND"
-paths = ['''(?:^|/)deploy/tests/test_replace_primary_vless\.py$''']
+paths = ['''(?:^|/)deploy/tests/test_(?:replace_primary_vless|profile_links)\.py$''']
 regexes = ['''^11111111-2222-4333-8444-555555555555$''']
 
 [[rules]]

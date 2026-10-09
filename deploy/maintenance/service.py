@@ -17,6 +17,8 @@ from .store import JobBusy, JobConflict
 from .strategy_catalog import StrategyRequest
 from .strategy_runner import StrategyUnavailable
 from .strategy_state import StrategyConflict
+from .profile_catalog import ProfileRequest
+from .profile_runner import ProfileUnavailable
 
 
 class ServiceError(RuntimeError):
@@ -54,12 +56,13 @@ def process_lock(private_path: Path):
 
 
 class MaintenanceService:
-    def __init__(self, store, inventory=None, queue_release_check=None, executor_ready=None, strategies=None):
+    def __init__(self, store, inventory=None, queue_release_check=None, executor_ready=None, strategies=None, profiles=None):
         self.store = store
         self.inventory = inventory
         self.queue_release_check = queue_release_check
         self.executor_ready = executor_ready or (lambda: False)
         self.strategies = strategies
+        self.profiles = profiles
 
     def handle(self, raw, peer_uid):
         try:
@@ -67,6 +70,9 @@ class MaintenanceService:
             method, params = frame["method"], frame["params"]
             if method == "submit":
                 parsed = parse_request(params['request'])
+                if isinstance(parsed,ProfileRequest):
+                    if self.profiles is None: return {'ok':False,'error':'not_configured'}
+                    return {'ok':True,'result':self.profiles.submit(params['job_id'],parsed,params['actor'])}
                 if isinstance(parsed, StrategyRequest):
                     if self.strategies is None:
                         return {'ok':False,'error':'not_configured'}
@@ -77,7 +83,14 @@ class MaintenanceService:
             elif method == "cancel":
                 result = asdict(self.store.cancel(params["job_id"]))
             elif method == "job":
-                result = self.strategies.job(params['job_id']) if self.strategies else asdict(self.store.get_job(params["job_id"]))
+                if self.profiles and isinstance(self.store.get_request(params['job_id']),ProfileRequest):
+                    result=self.profiles.job(params['job_id'])
+                else:
+                    result = self.strategies.job(params['job_id']) if self.strategies else asdict(self.store.get_job(params["job_id"]))
+            elif method=='profile_snapshot' and self.profiles:
+                result=self.profiles.snapshot(params['actor'])
+            elif method=='profile_stage' and self.profiles:
+                result=self.profiles.stage(params['uri'],params['actor'])
             elif method == 'strategy_snapshot' and self.strategies:
                 result = self.strategies.snapshot()
             elif method == "jobs":
@@ -101,7 +114,7 @@ class MaintenanceService:
             return {"ok": False, "error": "busy", "job_id": error.job_id}
         except (JobConflict, StrategyConflict):
             return {"ok": False, "error": "conflict"}
-        except StrategyUnavailable:
+        except (StrategyUnavailable, ProfileUnavailable):
             return {'ok':False,'error':'not_configured'}
         except (ProtocolError, ValueError, TypeError, KeyError, RecursionError):
             return {"ok": False, "error": "invalid_request"}

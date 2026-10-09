@@ -10,6 +10,7 @@ from .antidpi_host import atomic_private, read_private
 from .backups import private_directory
 from .profile_catalog import identifier, timestamp, observation, acceptable
 from .profile_links import parse_link, safe_summary
+from .profile_links import public_ip
 from .protocol import canonical
 
 
@@ -45,7 +46,7 @@ class ProfileDrafts:
             if len(list(self.root.glob('*.json')))>=8: raise ValueError('draft_limit')
             draft_id = uuid.uuid4().hex
             value = dict(draft_id=draft_id,actor=actor,revision=revision,created_at=now,expires_at=now+1800,
-                         profile=profile,checked_at=None,results=[])
+                         profile=profile,checked_at=None,results=[],endpoint_ip=None)
             atomic_private(self._path(draft_id),canonical(value))
             return self.public(draft_id,actor,now)
 
@@ -57,7 +58,7 @@ class ProfileDrafts:
                 raise ValueError('draft_unavailable')
             return value
 
-    def checked(self, draft_id, revision, results, now):
+    def checked(self, draft_id, revision, results, now, endpoint_ip=None):
         timestamp(now)
         if not isinstance(results,list) or len(results)!=9: raise ValueError('invalid_probe_count')
         rows = [observation(row) for row in results]
@@ -66,7 +67,7 @@ class ProfileDrafts:
             value = self._read(draft_id)
             if value['revision']!=revision or not value['created_at']<=now<value['expires_at']:
                 raise ValueError('draft_changed')
-            value.update(checked_at=now,results=rows)
+            value.update(checked_at=now,results=rows,endpoint_ip=public_ip(endpoint_ip) if endpoint_ip else None)
             atomic_private(self._path(draft_id),canonical(value))
 
     def public(self, draft_id, actor, now):
@@ -75,7 +76,7 @@ class ProfileDrafts:
         passed = checked_at is not None and 0<=now-checked_at<=300 and acceptable(value['results'])
         return dict(safe_summary(value['profile']), draft_id=draft_id, revision=value['revision'],
                     created_at=value['created_at'], expires_at=value['expires_at'], checked_at=checked_at,
-                    check_passed=passed, results=value['results'])
+                    check_passed=passed, results=value['results'], endpoint_ip=value.get('endpoint_ip'))
 
     def list(self, actor, now):
         with self.lock:

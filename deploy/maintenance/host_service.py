@@ -26,6 +26,9 @@ from .strategy_state import StrategyStore
 from .strategy_runner import StrategyRunner
 from .worker import JobLoop
 from .antidpi_dns import DnsRefresher
+from .profile_state import ProfileDrafts
+from .profile_host import ProfileHost
+from .profile_runner import ProfileRunner
 
 PRIVATE=Path('/volume1/docker/vpn-dashboard-maintenance/private')
 RUNTIME=Path('/volume1/docker/vpn-antidpi/runtime')
@@ -143,13 +146,18 @@ def assemble():
     return jobs,runner,adapter,control
 
 
+def assemble_profiles(jobs):
+    return ProfileRunner(jobs,ProfileDrafts(PRIVATE/'profile-drafts'),ProfileHost(jobs,private=PRIVATE))
+
+
 def main():
     if os.name!='posix' or os.geteuid()!=0: raise ValueError('linux_root_required')
     prepare_socket_parent()  # Do not remove this bind-mounted directory on service stop.
     jobs,runner,adapter,control=assemble()
+    profiles=assemble_profiles(jobs)
     stop,ready=threading.Event(),threading.Event()
     for signum in (signal.SIGTERM,signal.SIGINT): signal.signal(signum,lambda *_:stop.set())
-    service=MaintenanceService(jobs,strategies=runner)  # General component mutations remain disabled.
+    service=MaintenanceService(jobs,strategies=runner,profiles=profiles)  # General component mutations remain disabled.
     server=UnixServer(service,SOCKET)
     thread=threading.Thread(target=server.serve,args=(stop,ready),daemon=True); thread.start()
     if not ready.wait(10): raise ValueError('worker_socket_unavailable')
@@ -182,7 +190,7 @@ def main():
             adapter.refresh()
             stop.wait(5)
     monitor_thread=threading.Thread(target=monitor,daemon=True); monitor_thread.start()
-    loop=JobLoop(runner)
+    loop=JobLoop(runner,profiles=profiles)
     try:
         while not stop.is_set() and thread.is_alive():
             try: loop.tick(time.time())
