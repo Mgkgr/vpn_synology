@@ -164,5 +164,14 @@ class ProfileRunnerTests(unittest.TestCase):
             raw=canonical(dict(version=1,method='profile_snapshot',params=dict(actor='owner')))+b'\n'
             self.assertEqual(service.handle(raw,10001),dict(ok=False,error='not_configured'))
 
+    def test_unconfirmed_probe_cleanup_keeps_lock_and_never_marks_check_passed(self):
+        from maintenance.profile_host import ProbeCleanupUnconfirmed
+        def failed(*args): raise ProbeCleanupUnconfirmed('probe_cleanup_unconfirmed')
+        self.host.preflight=failed
+        result=self.check()
+        self.assertEqual(result['phase'],'needs_reconcile')
+        self.assertEqual(self.jobs.lock_state(1000)['state'],'needs_reconcile')
+        self.assertFalse(self.runner.snapshot('owner')['drafts'][0]['check_passed'])
+
 
 if __name__=='__main__': unittest.main()

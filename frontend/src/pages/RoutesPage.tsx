@@ -50,7 +50,7 @@ export function RoutesPage({ data }: { data?: RouteViewData }) {
         <div><p className="eyebrow">02 / ТОПОЛОГИЯ</p><h1>Маршруты</h1><p>Основной и резервный выходы fallback-группы показаны отдельными ветками.</p></div>
         <div className="header-status"><span>{view?.selected ? `выбран ${outboundLabel(view.selected)}` : 'выбор неизвестен'}</span><span>Группа {view?.groupName ?? '…'}</span></div>
       </header>
-      <p className="maintenance-hint"><a href="/routes/antidpi/strategies">Anti-DPI: стратегии, проверки и автосмена</a></p>
+      <p className="maintenance-hint maintenance-toolbar"><a href="/routes/profiles">Ключи VPN: заменить VLESS / Hysteria2</a><a href="/routes/antidpi/strategies">Anti-DPI: стратегии, проверки и автосмена</a></p>
       {data === undefined && <OutboundHealthPanel data={health.data} isLoading={health.isLoading} error={health.error} />}
       <AsyncState loading={query.isLoading} error={query.error} empty={!view} emptyLabel="Маршруты пока не получены.">
         {view && <>

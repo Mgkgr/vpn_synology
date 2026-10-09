@@ -14,6 +14,7 @@ import { RulesPage } from './pages/RulesPage'
 import { UpdatesPage } from './pages/UpdatesPage'
 import { ComponentsPage } from './pages/ComponentsPage'
 import { AntidpiStrategiesPage } from './pages/AntidpiStrategiesPage'
+import { OutboundProfilesPage } from './pages/OutboundProfilesPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,6 +45,7 @@ function ApplicationRoutes() {
     <Route path="/login" element={<LoginPage onAuthenticated={authenticated} />} />
     <Route path="/overview" element={<Protected sessionKey={authVersion}><OverviewPage /></Protected>} />
     <Route path="/routes" element={<Protected sessionKey={authVersion}><RoutesPage /></Protected>} />
+    <Route path="/routes/profiles" element={<Protected sessionKey={authVersion}><OutboundProfilesPage /></Protected>} />
     <Route path="/routes/antidpi/strategies" element={<Protected sessionKey={authVersion}><AntidpiStrategiesPage /></Protected>} />
     <Route path="/clients" element={<Protected sessionKey={authVersion}><ClientsPage /></Protected>} />
     <Route path="/rules" element={<Protected sessionKey={authVersion}><RulesPage /></Protected>} />

@@ -5,6 +5,7 @@ import json
 import time
 
 from .profile_catalog import ProfileRequest, parse_profile_request, identifier, observation, acceptable
+from .profile_host import ProbeCleanupUnconfirmed
 from .protocol import canonical
 from .store import JobConflict, TERMINAL
 
@@ -130,7 +131,9 @@ class ProfileRunner:
                         self.jobs.set_phase(job_id,'failed',now=self.clock(),error_code='profile_reverted')
         except Exception as error:
             job=self.jobs.get_job(job_id)
-            if job.phase in ('apply','verify','rollback'):
+            if isinstance(error,ProbeCleanupUnconfirmed):
+                self.jobs.needs_reconcile(job_id,'probe_cleanup_unconfirmed',now=self.clock())
+            elif job.phase in ('apply','verify','rollback'):
                 self.jobs.needs_reconcile(job_id,'worker_interrupted',now=self.clock())
             elif job.phase not in TERMINAL and job.phase!='needs_reconcile':
                 safe={'cancelled','profile_deadline','profile_check_failed','profile_backup_failed','profile_check_required','revision_changed','draft_unavailable'}

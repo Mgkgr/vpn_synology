@@ -27,6 +27,9 @@ PRIVATE=Path('/volume1/docker/vpn-dashboard-maintenance/private')
 DOCKER='/usr/local/bin/docker'
 
 
+class ProbeCleanupUnconfirmed(RuntimeError): pass
+
+
 def _blocks(text):
     sections=list(re.finditer(r'(?m)^proxies:[ \t]*(?:#.*)?\r?$',text))
     if len(sections)!=1: raise ValueError('invalid_proxy_section')
@@ -216,6 +219,19 @@ class ProfileHost:
         if actual!=image+'|vpn-gateway|true': raise ValueError('mihomo_identity_changed')
         return image
 
+    def cleanup_probe(self,job_id):
+        name='vpn-profile-check-'+identifier(job_id)
+        def present():
+            return self._command('ps','-aq','--filter','name=^/'+name+'$').strip()
+        try:
+            if not present(): return
+            label=self._command('inspect','--format','{{index .Config.Labels "vpn.dashboard.profile-check"}}',name).strip()
+            if label!=job_id: raise ValueError('probe_not_owned')
+            self._command('rm','-f',name,timeout=20)
+            if present(): raise ValueError('probe_removal_unconfirmed')
+        except Exception:
+            raise ProbeCleanupUnconfirmed('probe_cleanup_unconfirmed') from None
+
     def preflight(self,profile,job_id,report):
         identifier(job_id); image=self._image(); endpoint=resolve_public(profile['server'],self.run)
         private_directory(self.private/'profile-probes')
@@ -243,11 +259,9 @@ class ProfileHost:
             return dict(results=rows,endpoint_ip=endpoint)
         finally:
             # Exact owned name+label, including a lost docker-run acknowledgement.
-            try:
-                label=self._command('inspect','--format','{{index .Config.Labels "vpn.dashboard.profile-check"}}',name).strip()
-                if label==job_id: self._command('rm','-f',name,timeout=20)
-            except Exception: pass
-            if path.exists(): path.unlink()
+            try: self.cleanup_probe(job_id)
+            finally:
+                if path.exists(): path.unlink()
 
     def _record(self,token):
         identifier(token,64)

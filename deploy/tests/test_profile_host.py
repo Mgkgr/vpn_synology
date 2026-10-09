@@ -4,6 +4,7 @@ from pathlib import Path, PurePosixPath
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 sys.path.insert(0,str(Path(__file__).parents[1]))
 from maintenance.profile_links import parse_link
@@ -64,6 +65,18 @@ class ProfileHostTests(unittest.TestCase):
             self.assertFalse(host.rollback(token,original))
             self.assertEqual(config.read_text(encoding='utf-8'),'concurrent change')
             self.assertEqual(len(calls),1)
+
+    def test_probe_cleanup_checks_exact_label_and_confirms_removal(self):
+        host=self.m.ProfileHost.__new__(self.m.ProfileHost)
+        job='a'*32
+        host._command=Mock(side_effect=['b'*64, job, '', ''])
+        host.cleanup_probe(job)
+        self.assertEqual(host._command.call_args_list[2].args,('rm','-f','vpn-profile-check-'+job))
+        host._command=Mock(side_effect=['b'*64,'not-owned'])
+        with self.assertRaises(self.m.ProbeCleanupUnconfirmed): host.cleanup_probe(job)
+        self.assertEqual(host._command.call_count,2)
+        host._command=Mock(side_effect=['b'*64,job,'','b'*64])
+        with self.assertRaises(self.m.ProbeCleanupUnconfirmed): host.cleanup_probe(job)
 
 
 if __name__=='__main__': unittest.main()

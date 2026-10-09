@@ -1,4 +1,5 @@
 import type { StrategyProgress } from './antidpiTypes'
+import type { ProfileProgress } from './profileTypes'
 
 export type ComponentId = 'wireguard' | 'mihomo' | 'uptime-kuma' | 'metacubexd' | 'dashboard' | 'antidpi'
 export type MaintenanceOperation = {
@@ -17,6 +18,7 @@ export type MaintenanceJob = {
   maintenance_until?: number | null; error_code?: string | null
   cancel_allowed: boolean; cancel_requested?: boolean
   strategy?: StrategyProgress
+  profile?: ProfileProgress
 }
 export type ComponentRelease = {
   release_id: string; version: string; published_at: string; digest: string | null

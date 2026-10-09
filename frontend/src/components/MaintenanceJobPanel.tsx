@@ -1,4 +1,5 @@
 import type { ComponentId, MaintenanceJob } from '../api/maintenanceTypes'
+import { ProfileProbeResults } from './ProfileProbeResults'
 
 export const COMPONENT_NAMES: Record<ComponentId, string> = {
   wireguard: 'WireGuard / wg-easy', mihomo: 'Mihomo', 'uptime-kuma': 'Uptime Kuma',
@@ -30,6 +31,14 @@ const REASONS: Record<string, string> = {
   strategy_deadline: 'Истёк лимит времени задания.',
   strategy_attempt_limit: 'Достигнут предел числа попыток.',
   strategy_policy_revoked: 'Разрешение автоматической проверки отозвано.',
+  profile_check_required: 'Нужна успешная проверка этого ключа не старше пяти минут.',
+  profile_check_failed: 'Новый ключ не прошёл повторные проверки. Рабочий маршрут не изменён.',
+  profile_backup_failed: 'Резервная копия не подтверждена. Применение не начато.',
+  profile_reverted: 'Проверка после замены не прошла; прежняя конфигурация возвращена. Её доступность этим не подтверждается.',
+  profile_unavailable: 'Проверка не завершилась: проверьте доступность исполнителя, DNS сервера и конфигурацию на NAS.',
+  probe_cleanup_unconfirmed: 'Не удалось подтвердить удаление тестового контейнера. Замены заблокированы до проверки на NAS; рабочий ключ не изменён.',
+  profile_deadline: 'Истёк лимит времени проверки ключа.',
+  draft_unavailable: 'Черновик истёк или недоступен. Вставьте ссылку заново.',
 }
 export function maintenanceDate(value: number | null | undefined) {
   return value ? new Date(value * 1000).toLocaleString('ru-RU') : 'Нет данных'
@@ -43,6 +52,7 @@ export function MaintenanceJobPanel({ job, onCancel }: { job: MaintenanceJob; on
         <dt>Начало</dt><dd>{maintenanceDate(job.started_at)}</dd><dt>Завершение</dt><dd>{maintenanceDate(job.finished_at)}</dd></dl>
       {job.error_code && <p role="alert">{REASONS[job.error_code] ?? 'Операция не завершена. Нужна проверка состояния; повторный запуск автоматически не выполняется.'}</p>}
       {job.strategy && <p role="status">Попыток завершено: {job.strategy.completed} · предел {job.strategy.limit}. {({ queued: 'Ожидает запуска', checking: 'Проверяются стратегии', backup: 'Создаётся копия', applying: 'Применяется кандидат', verifying: 'Проверяется реальный вход Anti-DPI', verified: 'Проверка после применения успешна', rollback: 'Возвращается конфигурация', finished: 'Проверки закончены' } as Record<string, string>)[job.strategy.step] ?? 'Проверка условий'}</p>}
+      {job.profile && <><p role="status">{job.profile.action === 'profile_check' ? 'Новый ключ · изолированная проверка' : 'Применение ключа'} · завершено проб {job.profile.completed} из {job.profile.limit}</p><ProfileProbeResults results={job.profile.results} /></>}
       {['unknown', 'needs_reconcile'].includes(job.phase) && <p>Не запускайте повторно. Страница проверяет прежний ID задания; закрытие вкладки не отменяет операцию.</p>}
       {job.maintenance_until && !FINISHED_PHASES.has(job.phase) && <p>Плановое окно до {maintenanceDate(job.maintenance_until)}. Это не подтверждение исправности VPN; окно автоматически не продлевается.</p>}
       {job.cancel_requested && <p>Отмена запрошена; ожидается безопасное завершение текущего этапа.</p>}

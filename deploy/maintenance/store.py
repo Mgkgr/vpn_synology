@@ -270,7 +270,7 @@ class JobStore:
 
     def needs_reconcile(self, job_id, code, now=None):
         require_id(job_id)
-        if code not in ("restart_failed", "update_failed", "rollback_failed", "worker_interrupted", "identity_changed"):
+        if code not in ("restart_failed", "update_failed", "rollback_failed", "worker_interrupted", "identity_changed", "probe_cleanup_unconfirmed"):
             raise JobConflict("invalid_reconcile_code")
         now = time.time() if now is None else now
         with self._write() as db:

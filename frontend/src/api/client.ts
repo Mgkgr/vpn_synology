@@ -27,6 +27,7 @@ import type {
 } from './types'
 import type { CancelOperation, MaintenanceInventory, MaintenanceJob, MaintenanceOperation } from './maintenanceTypes'
 import type { StrategyOperation, StrategySnapshot } from './antidpiTypes'
+import type { ProfileDraft, ProfileOperation, ProfileSnapshot } from './profileTypes'
 
 export class ApiError extends Error {
   constructor(public readonly status: number, message: string) {
@@ -57,10 +58,11 @@ async function request<T>(path: string, init: RequestInit = {}, notifyUnauthoriz
       csrfToken = null
       unauthorizedHandler?.()
     }
-    const maintenanceError = path.startsWith('/maintenance/')
+    const profileError = path.startsWith('/outbound-profiles') && response.status === 422 ? 'Ссылка не поддерживается или лимит черновиков исчерпан. Используйте одну ссылку VLESS TCP/REALITY или Hysteria2/salamander.' : undefined
+    const maintenanceError = path.startsWith('/maintenance/') || path.startsWith('/outbound-profiles')
       ? ({ 403: 'Действие доступно владельцу. Проверьте пароль и сессию.', 409: 'Состояние изменилось или уже выполняется операция. Обновите данные.', 429: 'Слишком много попыток. Подождите перед повторной проверкой.', 503: 'Исполнитель обслуживания недоступен. Результат операции не подтверждён.' } as Record<number, string>)[response.status]
       : undefined
-    const message = maintenanceError ?? (response.status === 401
+    const message = profileError ?? maintenanceError ?? (response.status === 401
       ? 'Требуется вход в панель.'
       : response.status === 403
         ? 'Сессия истекла. Войдите снова.'
@@ -85,13 +87,15 @@ async function openSession(path: '/auth/login', username: string, password: stri
 }
 
 export const api = {
+  outboundProfiles: () => request<ProfileSnapshot>('/outbound-profiles', { signal: AbortSignal.timeout(12_000) }),
+  previewOutboundProfile: (uri: string) => request<ProfileDraft>('/outbound-profiles/preview', { method: 'POST', body: JSON.stringify({ uri }), signal: AbortSignal.timeout(12_000) }),
   antidpiStrategies: () => request<StrategySnapshot>('/antidpi/strategies', { signal: AbortSignal.timeout(12_000) }),
   maintenanceComponents: () => request<MaintenanceInventory>('/maintenance/components', { signal: AbortSignal.timeout(12_000) }),
   maintenanceJobs: () => request<{ available: boolean; jobs: MaintenanceJob[] }>('/maintenance/jobs', { signal: AbortSignal.timeout(12_000) }),
   maintenanceJob: (jobId: string) => request<MaintenanceJob>(`/maintenance/jobs/${encodeURIComponent(jobId)}`, { signal: AbortSignal.timeout(12_000) }),
   checkComponentReleases: () => request<{ queued: boolean }>('/maintenance/check', { method: 'POST', body: '{}', signal: AbortSignal.timeout(12_000) }),
-  authorizeMaintenance: (operation: MaintenanceOperation | CancelOperation | StrategyOperation, password: string) => request<{ grant: string; expires_in: number }>('/maintenance/authorize', { method: 'POST', body: JSON.stringify({ operation, password }), signal: AbortSignal.timeout(12_000) }),
-  submitMaintenance: (jobId: string, operation: MaintenanceOperation | StrategyOperation, grant: string) => request<MaintenanceJob>('/maintenance/jobs', { method: 'POST', body: JSON.stringify({ job_id: jobId, operation, grant }), signal: AbortSignal.timeout(12_000) }),
+  authorizeMaintenance: (operation: MaintenanceOperation | CancelOperation | StrategyOperation | ProfileOperation, password: string) => request<{ grant: string; expires_in: number }>('/maintenance/authorize', { method: 'POST', body: JSON.stringify({ operation, password }), signal: AbortSignal.timeout(12_000) }),
+  submitMaintenance: (jobId: string, operation: MaintenanceOperation | StrategyOperation | ProfileOperation, grant: string) => request<MaintenanceJob>('/maintenance/jobs', { method: 'POST', body: JSON.stringify({ job_id: jobId, operation, grant }), signal: AbortSignal.timeout(12_000) }),
   cancelMaintenance: (jobId: string, grant: string) => request<MaintenanceJob>(`/maintenance/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST', body: JSON.stringify({ grant }), signal: AbortSignal.timeout(12_000) }),
   async restoreSession(): Promise<AuthSession> {
     const session = await request<AuthSession>('/auth/csrf', {}, false)

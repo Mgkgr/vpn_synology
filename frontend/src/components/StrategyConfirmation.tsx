@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type { StrategyOperation } from '../api/antidpiTypes'
 import type { CancelOperation } from '../api/maintenanceTypes'
+import type { ProfileOperation } from '../api/profileTypes'
 
-type Operation = StrategyOperation | CancelOperation
+type Operation = StrategyOperation | CancelOperation | ProfileOperation
 const LABELS = { strategy_check: 'Проверить текущую стратегию', strategy_tune: 'Подобрать стратегии',
   strategy_configure: 'Сохранить режим и расписание', strategy_apply: 'Применить стратегию',
-  strategy_rollback: 'Вернуть предыдущую стратегию', cancel: 'Отменить задание' }
+  strategy_rollback: 'Вернуть предыдущую стратегию', cancel: 'Отменить задание', profile_check: 'Проверить новый ключ', profile_apply: 'Применить новый ключ' }
 
 export function StrategyConfirmation({ operation, serviceName, onConfirm, onClose }: {
   operation: Operation; serviceName: string; onConfirm: (password: string) => Promise<void>; onClose: () => void
@@ -34,7 +35,9 @@ export function StrategyConfirmation({ operation, serviceName, onConfirm, onClos
   return <div className="dialog-backdrop"><section className="dialog maintenance-confirm" role="dialog" aria-modal="true" aria-labelledby="strategy-confirm-title" ref={dialog} onKeyDown={keyDown}>
     <h2 id="strategy-confirm-title">{LABELS[operation.action]}</h2><p>{serviceName}</p>
     {operation.action === 'strategy_apply' && <p>После применения: {operation.settings.mode === 'auto' ? 'Авто' : 'Закрепить'} · {operation.settings.strategy_id}</p>}
-    {changes ? <p>Кандидат будет проверен до применения. Возможен краткий разрыв соединений Anti-DPI; VLESS, Hysteria2 и WireGuard не перезапускаются.</p>
+    {operation.action === 'profile_check' ? <p>Новый ключ проверяется в отдельном контейнере по трём HTTPS-сайтам. Рабочие маршруты не переключаются.</p>
+      : operation.action === 'profile_apply' ? <p>Сначала создаётся зашифрованная копия. Затем Mihomo перечитает настройки без рестарта контейнера; возможно краткое переподключение. При неуспешной проверке возвращается прежняя конфигурация. WireGuard и второй выход сохраняются.</p>
+      : changes ? <p>Кандидат будет проверен до применения. Возможен краткий разрыв соединений Anti-DPI; VLESS, Hysteria2 и WireGuard не перезапускаются.</p>
       : <p>Ручная проверка и подбор не меняют стратегию. Автосмена разрешается только отдельной настройкой режима «Авто».</p>}
     {operation.action === 'strategy_configure' && operation.settings.enabled && operation.settings.mode === 'auto' && <p>Разрешается автосмена только этого сервиса в текущем каталоге: после трёх отказов, не чаще раза в 15 минут и двух раз в час. При смене версии разрешение отзывается.</p>}
     <form onSubmit={submit}><label>Пароль владельца<input ref={passwordInput} type="password" autoComplete="current-password" maxLength={1024} value={password} disabled={pending} onChange={event => setPassword(event.target.value)} required /></label>
