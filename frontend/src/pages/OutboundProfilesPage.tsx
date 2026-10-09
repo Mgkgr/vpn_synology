@@ -36,7 +36,8 @@ export function OutboundProfilesPage() {
   const data = snapshot.data
   const observed: MaintenanceJob | null = jobId ? job.data ?? { job_id: jobId, phase: 'unknown', cancel_allowed: false } : null
   const busy = importing || jobs.isLoading || !!jobs.error || !jobs.data?.available || jobs.data.jobs.some(item => !FINISHED_PHASES.has(item.phase)) || (!!observed && !FINISHED_PHASES.has(observed.phase))
-  const drafts = data?.drafts ?? [], draft = drafts.find(item => item.draft_id === draftId) ?? drafts.at(-1)
+  const drafts = [...(data?.drafts ?? [])].sort((a, b) => a.created_at - b.created_at || a.draft_id.localeCompare(b.draft_id))
+  const draft = drafts.find(item => item.draft_id === draftId) ?? drafts.at(-1)
   const fresh = !!draft && draft.revision === data?.revision && draft.expires_at > Date.now() / 1000
   const canApply = fresh && draft.check_passed && draft.checked_at !== null && Date.now() / 1000 - draft.checked_at >= 0 && Date.now() / 1000 - draft.checked_at <= 300 && !!draft.endpoint_ip
   async function preview(event: React.FormEvent) {

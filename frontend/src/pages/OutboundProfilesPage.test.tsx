@@ -69,6 +69,17 @@ it('does not allow stale or revision-mismatched evidence to apply', async () => 
   expect(screen.getByText(/Настройки изменились/)).toBeVisible()
 })
 
+it('restores the newest draft after a reload even when opaque IDs arrive out of order', async () => {
+  const now = Date.now() / 1000
+  vi.mocked(api.outboundProfiles).mockResolvedValue({ ...snapshot(), drafts: [
+    { ...draft(), draft_id: 'a'.repeat(32), server: 'newest.example', created_at: now },
+    { ...draft(), draft_id: 'f'.repeat(32), server: 'previous.example', created_at: now - 60 },
+  ] } as never)
+  mount()
+  expect(await screen.findByText('newest.example:443')).toBeVisible()
+  expect(screen.queryByText('previous.example:443')).not.toBeInTheDocument()
+})
+
 it('lost response polls the previous job without duplicate submission', async () => {
   vi.mocked(api.outboundProfiles).mockResolvedValue({ ...snapshot(), drafts: [draft()] } as never)
   vi.mocked(api.submitMaintenance).mockRejectedValue(new TypeError('Failed to fetch'))
